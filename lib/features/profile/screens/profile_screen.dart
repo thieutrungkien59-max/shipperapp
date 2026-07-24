@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({Key? key}) : super(key: key);
+  // Yêu cầu 1: Khai báo hàm callback để xử lý nút quay lại
+  final VoidCallback onBackPressed;
+  
+  const ProfileScreen({Key? key, required this.onBackPressed}) : super(key: key);
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
@@ -11,7 +14,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // Biến giả lập trạng thái từ Database: true = Đã duyệt, false = Bị khóa
   final bool _isApproved = true; 
   
-  // Màu sắc chủ đạo (Nên chuyển vào file constants sau này)
+  // Màu sắc chủ đạo 
   final Color _bgColor = const Color(0xFFFAF8F8);
   final Color _approvedColor = const Color(0xFF28A745); // Xanh lá
   final Color _lockedColor = const Color(0xFFDC3545); // Đỏ
@@ -19,43 +22,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _bgColor,
-      appBar: AppBar(
-        backgroundColor: _bgColor,
-        elevation: 0,
-        centerTitle: true,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black87),
-          onPressed: () {
-            // Yêu cầu 1: Nút quay lại màn hình trước đó
-            Navigator.pop(context);
-          },
-        ),
-        title: const Text(
-          'Hồ sơ của tôi',
-          style: TextStyle(
-            color: Colors.black87,
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.edit, color: Colors.black54),
-            onPressed: () {
-              // Yêu cầu 5: Nút chỉnh sửa thông tin (phát triển sau)
-              debugPrint('Mở tính năng chỉnh sửa hồ sơ');
-            },
-          ),
-        ],
-      ),
-      body: SingleChildScrollView(
+    return Container(
+      color: _bgColor,
+      child: SingleChildScrollView(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
+              const SizedBox(height: 16),
+              // --- Thanh Custom Header ---
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back, color: Colors.black87),
+                    onPressed: () {
+                      // Gọi hàm được truyền từ HomeScreen để quay lại tab trước
+                      widget.onBackPressed();
+                    },
+                  ),
+                  const Text(
+                    'Hồ sơ của tôi',
+                    style: TextStyle(
+                      color: Colors.black87,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.edit, color: Colors.black54),
+                    onPressed: () {
+                      debugPrint('Mở tính năng chỉnh sửa hồ sơ');
+                    },
+                  ),
+                ],
+              ),
+              // ----------------------------------------------------------------------
               const SizedBox(height: 16),
               _buildAvatarAndName(),
               const SizedBox(height: 12),
@@ -72,7 +75,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // Yêu cầu 2: Avatar đồng bộ (dùng chung link ảnh giả lập)
   Widget _buildAvatarAndName() {
     return Column(
       children: [
@@ -89,7 +91,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 backgroundImage: NetworkImage('https://i.pravatar.cc/150?img=11'),
               ),
             ),
-            // Chấm xanh online
             Container(
               width: 20,
               height: 20,
@@ -122,7 +123,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // Yêu cầu 3: Trạng thái cập nhật theo dữ liệu
   Widget _buildStatusBadge() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -152,7 +152,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // Thống kê hiệu suất
   Widget _buildPerformanceStats() {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
@@ -220,7 +219,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // Yêu cầu 4: Thông tin cá nhân (sẽ đổ dữ liệu từ DB vào đây)
   Widget _buildPersonalInfo() {
     return Container(
       padding: const EdgeInsets.all(16),

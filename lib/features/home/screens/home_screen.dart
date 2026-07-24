@@ -1,11 +1,10 @@
 // File: lib/features/home/screens/home_screen.dart
 import 'package:flutter/material.dart';
-// Import model vừa tạo theo đúng cấu trúc
 import '../../../models/don_hang_model.dart'; 
-
 import '../../orders/screens/order_list_tab.dart';
 import '../../profile/screens/profile_screen.dart';
-
+// Import màn hình Nhận đơn hàng
+import '../../orders/screens/order_accept_screen.dart'; 
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -15,14 +14,13 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  // Biến quản lý trạng thái tab hiện tại
+  // Quản lý tab hiện tại và tab trước đó
   int _currentIndex = 0;
+  int _previousIndex = 0; // Biến ghi nhớ vị trí tab cũ
 
-  // Màu sắc chủ đạo
   final Color _primaryRed = const Color(0xFFE51D35);
   final Color _bgColor = const Color(0xFFFAF8F8);
 
-  // Lấy dữ liệu giả lập từ Model (đơn hàng đang xử lý đầu tiên)
   final DonHangModel _currentOrder = DonHangModel.mockData[0];
 
   @override
@@ -30,7 +28,6 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       backgroundColor: _bgColor,
       appBar: _buildAppBar(),
-      // Hiển thị nội dung dựa trên tab được chọn
       body: _buildBodyContent(),
       bottomNavigationBar: _buildCustomBottomNav(),
     );
@@ -66,23 +63,28 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Hàm chuyển đổi nội dung giữa các Tab
   Widget _buildBodyContent() {
-  switch (_currentIndex) {
-    case 0:
-      return _buildHomeTab();
-    case 1:
-      return const OrderListTab();   // <-- thay dòng Center(Text(...)) bằng dòng này
-    case 2:
-      return const Center(child: Text('Màn hình Tài chính (Finance)'));
-    case 3:
-      return const ProfileScreen();
-    default:
-      return _buildHomeTab();
+    switch (_currentIndex) {
+      case 0:
+        return _buildHomeTab();
+      case 1:
+        return const OrderListTab();  
+      case 2:
+        return const Center(child: Text('Màn hình Tài chính (Finance)'));
+      case 3:
+        return ProfileScreen(
+          // Bắt sự kiện quay lại và cập nhật index về lại tab trước đó
+          onBackPressed: () {
+            setState(() {
+              _currentIndex = _previousIndex; 
+            });
+          },
+        );
+      default:
+        return _buildHomeTab();
+    }
   }
-}
 
-  // Giao diện chính của tab Home
   Widget _buildHomeTab() {
     return SingleChildScrollView(
       child: Padding(
@@ -95,7 +97,7 @@ class _HomeScreenState extends State<HomeScreen> {
             _buildStatsRow(),
             const SizedBox(height: 24),
             const Text(
-              'Đơn hàng đang xử lý',
+              'Đơn hàng',
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
@@ -103,7 +105,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             const SizedBox(height: 12),
-            // Gắn dữ liệu động vào Card
             _buildOrderCard(_currentOrder), 
           ],
         ),
@@ -199,7 +200,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Cập nhật hàm này để nhận tham số là dữ liệu từ Model
   Widget _buildOrderCard(DonHangModel order) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -215,7 +215,7 @@ class _HomeScreenState extends State<HomeScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                order.id, // Dữ liệu động
+                order.id, 
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 14,
@@ -228,7 +228,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  order.status, // Dữ liệu động
+                  order.status, 
                   style: TextStyle(
                     color: _primaryRed,
                     fontWeight: FontWeight.bold,
@@ -244,7 +244,7 @@ class _HomeScreenState extends State<HomeScreen> {
               Icon(Icons.person_outline, size: 20, color: Colors.grey.shade600),
               const SizedBox(width: 8),
               Text(
-                order.customerName, // Dữ liệu động
+                order.customerName, 
                 style: const TextStyle(fontSize: 15),
               ),
             ],
@@ -257,7 +257,7 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  order.address, // Dữ liệu động
+                  order.address, 
                   style: const TextStyle(fontSize: 15),
                 ),
               ),
@@ -268,7 +268,13 @@ class _HomeScreenState extends State<HomeScreen> {
             width: double.infinity,
             child: OutlinedButton(
               onPressed: () {
-                // Logic khi bấm vào "XEM CHI TIẾT"
+                // Điều hướng sang màn hình đếm ngược nhận đơn
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const OrderAcceptScreen(),
+                  ),
+                );
               },
               style: OutlinedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 12),
@@ -312,18 +318,21 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Tích hợp logic xử lý sự kiện bấm (onTap) vào từng nút
   Widget _buildNavItem(IconData icon, String label, int index) {
     bool isActive = _currentIndex == index;
 
     return GestureDetector(
       onTap: () {
-        setState(() {
-          _currentIndex = index; // Cập nhật trạng thái tab khi bấm
-        });
+        // Chỉ lưu lại vị trí cũ khi bạn thực sự đổi sang một tab khác
+        if (_currentIndex != index) {
+          setState(() {
+            _previousIndex = _currentIndex; // Lưu lại tab hiện tại làm tab cũ
+            _currentIndex = index; // Chuyển sang tab mới
+          });
+        }
       },
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200), // Hiệu ứng chuyển màu mượt mà
+        duration: const Duration(milliseconds: 200), 
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: isActive
             ? BoxDecoration(
