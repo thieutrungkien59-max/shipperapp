@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 // Import model vừa tạo theo đúng cấu trúc
 import '../../../models/don_hang_model.dart'; 
 
+import '../../orders/screens/order_list_tab.dart';
+
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
 
@@ -64,19 +67,19 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Hàm chuyển đổi nội dung giữa các Tab
   Widget _buildBodyContent() {
-    switch (_currentIndex) {
-      case 0:
-        return _buildHomeTab();
-      case 1:
-        return const Center(child: Text('Màn hình Đơn hàng (Orders)'));
-      case 2:
-        return const Center(child: Text('Màn hình Tài chính (Finance)'));
-      case 3:
-        return const Center(child: Text('Màn hình Cá nhân (Profile)'));
-      default:
-        return _buildHomeTab();
-    }
+  switch (_currentIndex) {
+    case 0:
+      return _buildHomeTab();
+    case 1:
+      return const OrderListTab();   // <-- thay dòng Center(Text(...)) bằng dòng này
+    case 2:
+      return const Center(child: Text('Màn hình Tài chính (Finance)'));
+    case 3:
+      return const Center(child: Text('Màn hình Cá nhân (Profile)'));
+    default:
+      return _buildHomeTab();
   }
+}
 
   // Giao diện chính của tab Home
   Widget _buildHomeTab() {
