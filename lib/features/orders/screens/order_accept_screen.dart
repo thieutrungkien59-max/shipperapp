@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import '../../map_tracking/screens/map_delivery_screen.dart';
 
 class OrderAcceptScreen extends StatefulWidget {
   const OrderAcceptScreen({Key? key}) : super(key: key);
@@ -28,9 +29,9 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
           _timeLeft--;
         });
       } else {
-        // Hết giờ: Hủy timer và tự động đóng màn hình (không nhận đơn)
+        // Hết giờ: Hủy timer và tự động đóng màn hình, thoát về Home
         _timer?.cancel();
-        Navigator.pop(context, false);
+        Navigator.pop(context);
       }
     });
   }
@@ -43,9 +44,13 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
 
   void _handleAcceptOrder() {
     _timer?.cancel();
-    // TODO: Chuyển sang màn hình Đang Giao Hàng
-    // Tạm thời đóng màn hình và trả về true (đã nhận)
-    Navigator.pop(context, true);
+    // Bấm nhận đơn: Hủy timer, xóa màn hình hiện tại và chuyển sang MapDeliveryScreen
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const MapDeliveryScreen(),
+      ),
+    );
   }
 
   @override
@@ -205,7 +210,7 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
                 elevation: 0,
               ),
               child: const Text(
-                'XÁC NHẬN NHẬN ĐƠN',
+                'XÁC NHẬN ĐƠN',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
