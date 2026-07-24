@@ -12,7 +12,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Shipper App',
+      title: 'LogiRoute Driver',
       debugShowCheckedModeBanner: false, 
       theme: ThemeData(
         primarySwatch: Colors.red,

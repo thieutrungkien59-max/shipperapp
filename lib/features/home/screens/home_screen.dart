@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../../models/don_hang_model.dart'; 
 
 import '../../orders/screens/order_list_tab.dart';
+import '../../profile/screens/profile_screen.dart';
 
 
 class HomeScreen extends StatefulWidget {
@@ -75,7 +76,7 @@ class _HomeScreenState extends State<HomeScreen> {
     case 2:
       return const Center(child: Text('Màn hình Tài chính (Finance)'));
     case 3:
-      return const Center(child: Text('Màn hình Cá nhân (Profile)'));
+      return const ProfileScreen();
     default:
       return _buildHomeTab();
   }
