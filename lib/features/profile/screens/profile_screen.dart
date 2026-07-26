@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../../services/api_service.dart'; // Đảm bảo đường dẫn này đúng với project của bạn
 
 class ProfileScreen extends StatefulWidget {
-  // Yêu cầu 1: Khai báo hàm callback để xử lý nút quay lại
   final VoidCallback onBackPressed;
   
   const ProfileScreen({Key? key, required this.onBackPressed}) : super(key: key);
@@ -11,67 +12,132 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  // Biến giả lập trạng thái từ Database: true = Đã duyệt, false = Bị khóa
-  final bool _isApproved = true; 
+  // Trạng thái màn hình
+  bool _isLoading = true;
+  String _errorMessage = '';
+
+  // Các biến chứa dữ liệu từ API
+  String _hoTen = '';
+  String _soDienThoai = '';
+  String _cccd = '';
+  String _gplx = '';
+  String _bienSoXe = '';
+  String _loaiPhuongTien = '';
+  String _taiTrongToiDa = '';
+  bool _isApproved = false;
   
   // Màu sắc chủ đạo 
   final Color _bgColor = const Color(0xFFFAF8F8);
-  final Color _approvedColor = const Color(0xFF28A745); // Xanh lá
-  final Color _lockedColor = const Color(0xFFDC3545); // Đỏ
+  final Color _approvedColor = const Color(0xFF28A745);
+  final Color _lockedColor = const Color(0xFFDC3545);
   final Color _primaryRed = const Color(0xFFE51D35);
+
+  late final ApiServices _apiService;
+
+  @override
+  void initState() {
+    super.initState();
+    _apiService = ApiServices();
+    _fetchProfileData();
+  }
+
+  // Hàm gọi API lấy dữ liệu Hồ sơ
+  Future<void> _fetchProfileData() async {
+    try {
+      // 1. Lấy mã Shipper đã lưu lúc Đăng nhập
+      final prefs = await SharedPreferences.getInstance();
+      final maSp = prefs.getString('maSp');
+
+      if (maSp == null || maSp.isEmpty) {
+        throw Exception('Không tìm thấy phiên đăng nhập. Vui lòng đăng nhập lại.');
+      }
+
+      // 2. Gọi API lấy thông tin (LƯU Ý: Thay đổi '/Shipper/$maSp' thành đúng đường dẫn Swagger của nhóm bạn)
+      final response = await _apiService.get('/Shipper/cccd');
+
+      // 3. Cập nhật giao diện
+      if (mounted) {
+        setState(() {
+          _hoTen = response['hoTen'] ?? 'Chưa cập nhật';
+          _soDienThoai = response['soDienThoai'] ?? '';
+          _cccd = response['cccd'] ?? 'Đang trống';
+          _gplx = response['gplx'] ?? 'Đang trống';
+          _bienSoXe = response['bienSoXe'] ?? 'Đang trống';
+          _loaiPhuongTien = response['loaiPhuongTien'] ?? 'Đang trống';
+          _taiTrongToiDa = '${response['taiTrongToiDa'] ?? 0} kg';
+          
+          // Kiểm tra trạng thái hồ sơ (Dựa theo giá trị Backend trả về)
+          final trangThai = response['trangThaiHoSo']?.toString().toLowerCase() ?? '';
+          _isApproved = trangThai.contains('daduyet') || trangThai.contains('đã duyệt');
+          
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = e.toString().replaceAll('Exception: ', '');
+          _isLoading = false;
+        });
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Container(
       color: _bgColor,
-      child: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              const SizedBox(height: 16),
-              // --- Thanh Custom Header ---
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.arrow_back, color: Colors.black87),
-                    onPressed: () {
-                      // Gọi hàm được truyền từ HomeScreen để quay lại tab trước
-                      widget.onBackPressed();
-                    },
-                  ),
-                  const Text(
-                    'Hồ sơ của tôi',
-                    style: TextStyle(
-                      color: Colors.black87,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
+      child: _isLoading 
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFFE51D35)))
+          : _errorMessage.isNotEmpty
+              ? Center(child: Text(_errorMessage, style: const TextStyle(color: Colors.red)))
+              : SingleChildScrollView(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        const SizedBox(height: 16),
+                        // --- Thanh Custom Header ---
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.arrow_back, color: Colors.black87),
+                              onPressed: () {
+                                widget.onBackPressed();
+                              },
+                            ),
+                            const Text(
+                              'Hồ sơ của tôi',
+                              style: TextStyle(
+                                color: Colors.black87,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.edit, color: Colors.black54),
+                              onPressed: () {
+                                debugPrint('Mở tính năng chỉnh sửa hồ sơ');
+                              },
+                            ),
+                          ],
+                        ),
+                        // ----------------------------------------------------------------------
+                        const SizedBox(height: 16),
+                        _buildAvatarAndName(),
+                        const SizedBox(height: 12),
+                        _buildStatusBadge(),
+                        const SizedBox(height: 24),
+                        _buildPerformanceStats(),
+                        const SizedBox(height: 16),
+                        _buildPersonalInfo(),
+                        const SizedBox(height: 32),
+                      ],
                     ),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.edit, color: Colors.black54),
-                    onPressed: () {
-                      debugPrint('Mở tính năng chỉnh sửa hồ sơ');
-                    },
-                  ),
-                ],
-              ),
-              // ----------------------------------------------------------------------
-              const SizedBox(height: 16),
-              _buildAvatarAndName(),
-              const SizedBox(height: 12),
-              _buildStatusBadge(),
-              const SizedBox(height: 24),
-              _buildPerformanceStats(),
-              const SizedBox(height: 16),
-              _buildPersonalInfo(),
-              const SizedBox(height: 32),
-            ],
-          ),
-        ),
-      ),
+                ),
     );
   }
 
@@ -103,18 +169,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ],
         ),
         const SizedBox(height: 16),
-        const Text(
-          'Nguyễn Văn A',
-          style: TextStyle(
+        Text(
+          _hoTen,
+          style: const TextStyle(
             fontSize: 22,
             fontWeight: FontWeight.bold,
             color: Colors.black87,
           ),
         ),
         const SizedBox(height: 4),
-        const Text(
-          '0901 234 567',
-          style: TextStyle(
+        Text(
+          _soDienThoai,
+          style: const TextStyle(
             fontSize: 15,
             color: Colors.black54,
           ),
@@ -140,7 +206,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           const SizedBox(width: 6),
           Text(
-            _isApproved ? 'ĐÃ DUYỆT' : 'BỊ KHÓA',
+            _isApproved ? 'ĐÃ DUYỆT' : 'CHỜ DUYỆT / KHÓA',
             style: const TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.bold,
@@ -175,11 +241,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _buildStatColumn('TỔNG ĐƠN', '1,248'),
+              _buildStatColumn('TỔNG ĐƠN', '0'), // Có thể map API thống kê vào đây sau
               _buildVerticalDivider(),
-              _buildStatColumn('THÀNH CÔNG', '98.5%', valueColor: _approvedColor),
+              _buildStatColumn('THÀNH CÔNG', '0%', valueColor: _approvedColor),
               _buildVerticalDivider(),
-              _buildStatColumn('ĐÁNH GIÁ', '4.9 ⭐'),
+              _buildStatColumn('ĐÁNH GIÁ', '0 ⭐'),
             ],
           ),
         ],
@@ -239,15 +305,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          _buildInfoRow('CCCD', '079xxxxxxxxx'),
+          _buildInfoRow('CCCD', _cccd),
           const Divider(height: 24, thickness: 1),
-          _buildInfoRow('GPLX', '123456789012'),
+          _buildInfoRow('GPLX', _gplx),
           const Divider(height: 24, thickness: 1),
-          _buildInfoRow('Đăng ký xe', '59-X1 123.45'),
+          _buildInfoRow('Đăng ký xe', _bienSoXe),
           const Divider(height: 24, thickness: 1),
-          _buildInfoRow('Loại phương tiện', 'Xe máy'),
+          _buildInfoRow('Loại phương tiện', _loaiPhuongTien),
           const Divider(height: 24, thickness: 1),
-          _buildInfoRow('Tải trọng tối đa', '50kg'),
+          _buildInfoRow('Tải trọng tối đa', _taiTrongToiDa),
         ],
       ),
     );

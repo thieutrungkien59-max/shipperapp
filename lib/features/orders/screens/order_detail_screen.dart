@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import '../../order_proof/screens/camera_proof_screen.dart';
 
 class OrderDetailScreen extends StatelessWidget {
-  const OrderDetailScreen({Key? key}) : super(key: key);
+  final bool isDeliveryPhase;
+
+  const OrderDetailScreen({Key? key, this.isDeliveryPhase = false}) : super(key: key);
 
   final Color _primaryRed = const Color(0xFFE51D35);
   final Color _successGreen = const Color(0xFF28A745);
@@ -15,16 +17,12 @@ class OrderDetailScreen extends StatelessWidget {
       appBar: _buildAppBar(context),
       body: Column(
         children: [
-          // Thanh tiến trình trạng thái đơn hàng
           _buildStatusStepper(),
-          
           Expanded(
             child: SingleChildScrollView(
               child: Column(
                 children: [
-                  // Giả lập ảnh bản đồ lộ trình (thay bằng ảnh thật hoặc Google Map tĩnh sau)
                   _buildMapSnapshot(),
-                  
                   Padding(
                     padding: const EdgeInsets.all(16.0),
                     child: Column(
@@ -42,8 +40,6 @@ class OrderDetailScreen extends StatelessWidget {
               ),
             ),
           ),
-          
-          // Nút bấm cố định dưới cùng
           _buildBottomButton(context),
         ],
       ),
@@ -63,20 +59,12 @@ class OrderDetailScreen extends StatelessWidget {
         children: [
           const Text(
             'Chi tiết đơn hàng',
-            style: TextStyle(
-              color: Colors.black87,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
+            style: TextStyle(color: Colors.black87, fontSize: 18, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 2),
           Text(
             'LR-VN-10293',
-            style: TextStyle(
-              color: Colors.grey.shade600,
-              fontSize: 13,
-              fontWeight: FontWeight.normal,
-            ),
+            style: TextStyle(color: Colors.grey.shade600, fontSize: 13, fontWeight: FontWeight.normal),
           ),
         ],
       ),
@@ -86,21 +74,21 @@ class OrderDetailScreen extends StatelessWidget {
   Widget _buildStatusStepper() {
     return Container(
       color: Colors.white,
-      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildStepItem('Xác nhận đơn', isActive: true, isDone: true),
+          _buildStepItem('Xác nhận đơn', isDone: true, isCurrent: false),
           _buildStepLine(isDone: true),
-          _buildStepItem('Đang lấy\nhàng', isActive: true, isDone: false, isCurrent: true),
-          _buildStepLine(isDone: false),
-          _buildStepItem('Đang giao', isActive: false, isDone: false),
+          _buildStepItem('Đang lấy\nhàng', isDone: isDeliveryPhase, isCurrent: !isDeliveryPhase),
+          _buildStepLine(isDone: isDeliveryPhase), 
+          _buildStepItem('Đang giao', isDone: false, isCurrent: isDeliveryPhase),
         ],
       ),
     );
   }
 
-  Widget _buildStepItem(String title, {required bool isActive, required bool isDone, bool isCurrent = false}) {
+  Widget _buildStepItem(String title, {required bool isDone, required bool isCurrent}) {
     Color iconColor;
     if (isDone) {
       iconColor = _successGreen;
@@ -114,8 +102,8 @@ class OrderDetailScreen extends StatelessWidget {
       child: Column(
         children: [
           Container(
-            width: 24,
-            height: 24,
+            width: 28,
+            height: 28,
             decoration: BoxDecoration(
               color: isDone || isCurrent ? iconColor : Colors.white,
               shape: BoxShape.circle,
@@ -125,9 +113,9 @@ class OrderDetailScreen extends StatelessWidget {
               ),
             ),
             child: isDone
-                ? const Icon(Icons.check, size: 16, color: Colors.white)
+                ? const Icon(Icons.check, size: 18, color: Colors.white)
                 : (isCurrent
-                    ? Center(child: Container(width: 8, height: 8, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle)))
+                    ? Center(child: Container(width: 10, height: 10, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle)))
                     : null),
           ),
           const SizedBox(height: 8),
@@ -135,9 +123,9 @@ class OrderDetailScreen extends StatelessWidget {
             title,
             textAlign: TextAlign.center,
             style: TextStyle(
-              fontSize: 10,
+              fontSize: 12,
               fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
-              color: isCurrent ? _primaryRed : (isActive ? Colors.black87 : Colors.grey),
+              color: isCurrent ? _primaryRed : (isDone ? Colors.black87 : Colors.grey.shade500),
             ),
           ),
         ],
@@ -148,7 +136,7 @@ class OrderDetailScreen extends StatelessWidget {
   Widget _buildStepLine({required bool isDone}) {
     return Expanded(
       child: Container(
-        margin: const EdgeInsets.only(top: 11),
+        margin: const EdgeInsets.only(top: 13),
         height: 2,
         color: isDone ? _successGreen : Colors.grey.shade300,
       ),
@@ -173,11 +161,7 @@ class OrderDetailScreen extends StatelessWidget {
   Widget _buildPickupAddressCard() {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade200),
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.grey.shade200)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -201,14 +185,8 @@ class OrderDetailScreen extends StatelessWidget {
               ),
               const SizedBox(width: 12),
               Container(
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey.shade300),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: IconButton(
-                  icon: const Icon(Icons.phone_outlined, color: Colors.black87),
-                  onPressed: () {},
-                ),
+                decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
+                child: IconButton(icon: const Icon(Icons.phone_outlined, color: Colors.black87), onPressed: () {}),
               ),
             ],
           ),
@@ -220,11 +198,7 @@ class OrderDetailScreen extends StatelessWidget {
   Widget _buildPackageInfoCard() {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade200),
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.grey.shade200)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -239,13 +213,10 @@ class OrderDetailScreen extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Khung giờ lấy hàng dự kiến:', style: TextStyle(fontSize: 14, color: Colors.grey.shade700)),
+              Text('Khung giờ lấy hàng:', style: TextStyle(fontSize: 14, color: Colors.grey.shade700)),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF2E5E0),
-                  borderRadius: BorderRadius.circular(6),
-                ),
+                decoration: BoxDecoration(color: const Color(0xFFF2E5E0), borderRadius: BorderRadius.circular(6)),
                 child: const Text('14:00 - 15:30', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
               ),
             ],
@@ -260,14 +231,7 @@ class OrderDetailScreen extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(label, style: TextStyle(fontSize: 14, color: Colors.grey.shade700)),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-            color: valueColor ?? Colors.black87,
-          ),
-        ),
+        Text(value, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: valueColor ?? Colors.black87)),
       ],
     );
   }
@@ -275,19 +239,12 @@ class OrderDetailScreen extends StatelessWidget {
   Widget _buildDropoffCard() {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade200),
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.grey.shade200)),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(10),
-            decoration: const BoxDecoration(
-              color: Color(0xFFF5EBE9),
-              shape: BoxShape.circle,
-            ),
+            decoration: const BoxDecoration(color: Color(0xFFF5EBE9), shape: BoxShape.circle),
             child: Icon(Icons.location_on, color: Colors.grey.shade600, size: 20),
           ),
           const SizedBox(width: 12),
@@ -300,8 +257,7 @@ class OrderDetailScreen extends StatelessWidget {
                 const Text(
                   '12 Thảo Điền, Quận 2, TP.H...',
                   style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1, overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
@@ -312,33 +268,34 @@ class OrderDetailScreen extends StatelessWidget {
     );
   }
 
+  // ĐÃ SỬA LỖI Ở ĐÂY: Xử lý đóng màn hình khi Camera báo thành công
   Widget _buildBottomButton(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: Colors.grey.shade200)),
-      ),
+      decoration: BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: Colors.grey.shade200))),
       child: SafeArea(
         child: SizedBox(
           width: double.infinity,
           height: 54,
           child: ElevatedButton.icon(
-            onPressed: () {
-              Navigator.push(
+            onPressed: () async {
+              // 1. Chuyển sang Camera và đợi kết quả
+              final success = await Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => const CameraProofScreen()),
+                MaterialPageRoute(builder: (context) => CameraProofScreen(isDeliveryPhase: isDeliveryPhase)),
               );
+
+              // 2. Nếu thành công, tự đóng màn hình Chi tiết này và truyền tín hiệu 'true' về cho Bản đồ
+              if (success == true) {
+                if (context.mounted) {
+                  Navigator.pop(context, true);
+                }
+              }
             },
             icon: const Icon(Icons.inventory_2_outlined, color: Colors.white, size: 20),
-            label: const Text(
-              'Xác nhận đã lấy hàng',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 15,
-                letterSpacing: 0.5,
-              ),
+            label: Text(
+              isDeliveryPhase ? 'Đã giao hàng thành công' : 'Đã lấy hàng — Bắt đầu giao',
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15, letterSpacing: 0.5),
             ),
             style: ElevatedButton.styleFrom(
               backgroundColor: _primaryRed,

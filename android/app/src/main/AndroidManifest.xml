@@ -3,6 +3,12 @@
         android:label="shipperapp"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        
+        <!-- API KEY GOOGLE MAPS -->
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="AIzaSyClidGWtQ6XICvlJa1kn9qKta6IBgEvx8A" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

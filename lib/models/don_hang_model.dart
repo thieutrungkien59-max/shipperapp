@@ -1,5 +1,3 @@
-// File: lib/models/don_hang_model.dart
-
 class DonHangModel {
   final String id;
   final String customerName;
@@ -13,19 +11,14 @@ class DonHangModel {
     required this.status,
   });
 
-  // Dữ liệu giả lập (Mock Data) - Rất dễ thêm, sửa, xóa tại đây
-  static List<DonHangModel> mockData = [
-    DonHangModel(
-      id: 'LR-VN-99283',
-      customerName: 'Nguyễn Văn A',
-      address: '123 Đường Lê Lợi, Quận 1, TP.HCM',
-      status: 'Đang giao',
-    ),
-    DonHangModel(
-      id: 'LR-VN-99284',
-      customerName: 'Trần Thị B',
-      address: '45 Nguyễn Trãi, Quận 5, TP.HCM',
-      status: 'Chờ lấy hàng',
-    ),
-  ];
+  // Hàm chuyển đổi dữ liệu JSON từ API thành đối tượng DonHangModel
+  factory DonHangModel.fromJson(Map<String, dynamic> json) {
+    return DonHangModel(
+      // Sử dụng cú pháp ?? '' để gán giá trị rỗng nếu API không trả về trường này, giúp tránh lỗi null
+      id: json['id']?.toString() ?? '',
+      customerName: json['customerName']?.toString() ?? '',
+      address: json['address']?.toString() ?? '',
+      status: json['status']?.toString() ?? '',
+    );
+  }
 }

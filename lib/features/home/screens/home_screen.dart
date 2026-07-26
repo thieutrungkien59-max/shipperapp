@@ -1,9 +1,9 @@
-// File: lib/features/home/screens/home_screen.dart
 import 'package:flutter/material.dart';
-import '../../../models/don_hang_model.dart'; 
+import '../../../models/don_hang_model.dart';
+import '../../../services/api_service.dart';
+import '../../../core/repositories/order_repository.dart';
 import '../../orders/screens/order_list_tab.dart';
 import '../../profile/screens/profile_screen.dart';
-// Import màn hình Nhận đơn hàng
 import '../../orders/screens/order_accept_screen.dart'; 
 
 class HomeScreen extends StatefulWidget {
@@ -16,12 +16,26 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   // Quản lý tab hiện tại và tab trước đó
   int _currentIndex = 0;
-  int _previousIndex = 0; // Biến ghi nhớ vị trí tab cũ
+  int _previousIndex = 0; 
 
   final Color _primaryRed = const Color(0xFFE51D35);
   final Color _bgColor = const Color(0xFFFAF8F8);
 
-  final DonHangModel _currentOrder = DonHangModel.mockData[0];
+  // Khai báo các biến để gọi API
+  late OrderRepository _orderRepository;
+  late Future<List<DonHangModel>> _futureOrders;
+
+  @override
+  void initState() {
+    super.initState();
+    // Khởi tạo Repository với API Service
+    _orderRepository = OrderRepository(ApiServices());
+    
+    // Gọi hàm lấy danh sách đơn hàng. 
+    // LƯU Ý: Tạm thời dùng mã shipper cứng (ví dụ: 'SHIPPER_01'). 
+    // Sau khi làm tính năng Đăng nhập, chúng ta sẽ lấy mã này từ dữ liệu User đã lưu.
+    _futureOrders = _orderRepository.getOrdersByShipper('SHIPPER_01'); 
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -73,7 +87,6 @@ class _HomeScreenState extends State<HomeScreen> {
         return const Center(child: Text('Màn hình Tài chính (Finance)'));
       case 3:
         return ProfileScreen(
-          // Bắt sự kiện quay lại và cập nhật index về lại tab trước đó
           onBackPressed: () {
             setState(() {
               _currentIndex = _previousIndex; 
@@ -105,10 +118,55 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             const SizedBox(height: 12),
-            _buildOrderCard(_currentOrder), 
+            _buildOrderSection(), 
           ],
         ),
       ),
+    );
+  }
+
+  // Khu vực xử lý hiển thị API bằng FutureBuilder
+  Widget _buildOrderSection() {
+    return FutureBuilder<List<DonHangModel>>(
+      future: _futureOrders,
+      builder: (context, snapshot) {
+        // Trạng thái 1: Đang chờ tải dữ liệu từ API
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Padding(
+            padding: EdgeInsets.all(32.0),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        } 
+        // Trạng thái 2: API trả về lỗi
+        else if (snapshot.hasError) {
+          return Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Center(
+              child: Text(
+                'Lỗi tải đơn hàng: ${snapshot.error}',
+                style: const TextStyle(color: Colors.red),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          );
+        } 
+        // Trạng thái 3: Call API thành công nhưng danh sách rỗng
+        else if (!snapshot.hasData || snapshot.data!.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.all(16.0),
+            child: Center(
+              child: Text(
+                'Hiện tại không có đơn hàng nào.',
+                style: TextStyle(color: Colors.grey, fontSize: 15),
+              ),
+            ),
+          );
+        }
+
+        // Trạng thái 4: Có dữ liệu, lấy phần tử đầu tiên hiển thị lên Home
+        final firstOrder = snapshot.data!.first;
+        return _buildOrderCard(firstOrder);
+      },
     );
   }
 
@@ -268,7 +326,6 @@ class _HomeScreenState extends State<HomeScreen> {
             width: double.infinity,
             child: OutlinedButton(
               onPressed: () {
-                // Điều hướng sang màn hình đếm ngược nhận đơn
                 Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -323,11 +380,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return GestureDetector(
       onTap: () {
-        // Chỉ lưu lại vị trí cũ khi bạn thực sự đổi sang một tab khác
         if (_currentIndex != index) {
           setState(() {
-            _previousIndex = _currentIndex; // Lưu lại tab hiện tại làm tab cũ
-            _currentIndex = index; // Chuyển sang tab mới
+            _previousIndex = _currentIndex; 
+            _currentIndex = index; 
           });
         }
       },

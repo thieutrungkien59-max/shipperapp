@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "899446571388",
+    "firebase_url": "https://logiroute-map-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "logiroute-map",
+    "storage_bucket": "logiroute-map.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:899446571388:android:97dfe1cd27643309e3e4f9",
+        "android_client_info": {
+          "package_name": "com.example.shipperapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyClidGWtQ6XICvlJa1kn9qKta6IBgEvx8A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
