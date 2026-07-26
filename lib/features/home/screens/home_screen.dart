@@ -5,6 +5,7 @@ import '../../../core/repositories/order_repository.dart';
 import '../../orders/screens/order_list_tab.dart';
 import '../../profile/screens/profile_screen.dart';
 import '../../orders/screens/order_accept_screen.dart'; 
+import '../../wallet_cod/screens/wallet_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -84,7 +85,7 @@ class _HomeScreenState extends State<HomeScreen> {
       case 1:
         return const OrderListTab();  
       case 2:
-        return const Center(child: Text('Màn hình Tài chính (Finance)'));
+        return const FinanceTab();
       case 3:
         return ProfileScreen(
           onBackPressed: () {
