@@ -26,6 +26,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String _taiTrongToiDa = '';
   bool _isApproved = false;
   
+  // ---> BỔ SUNG TÍNH NĂNG ĐỔI TRẠNG THÁI: Biến lưu trạng thái online/offline <---
+  bool _isOnline = false;
+  
   // Màu sắc chủ đạo 
   final Color _bgColor = const Color(0xFFFAF8F8);
   final Color _approvedColor = const Color(0xFF28A745);
@@ -52,12 +55,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
         throw Exception('Không tìm thấy phiên đăng nhập. Vui lòng đăng nhập lại.');
       }
 
-      // 2. Gọi API lấy thông tin (LƯU Ý: Thay đổi '/Shipper/$maSp' thành đúng đường dẫn Swagger của nhóm bạn)
+      // 2. Gọi API lấy thông tin 
       final response = await _apiService.get('/api/Auth/profile/$maTk');
       print('=== DỮ LIỆU PROFILE TRẢ VỀ: ===');
       print(response);
       print('=================================');
-      // 3. Cập nhật giao diện
+      
       // 3. Cập nhật giao diện
       if (mounted) {
         setState(() {
@@ -77,6 +80,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
           // Kiểm tra trạng thái hồ sơ (Trường 'trangThai' nằm ở ngoài cùng response)
           _isApproved = response['trangThai'] == true;
           
+          // ---> BỔ SUNG TÍNH NĂNG ĐỔI TRẠNG THÁI: Map dữ liệu TrucTuyen/NgoaiTuyen từ Backend <---
+          _isOnline = shipper['trangThaiHoatDong'] == 'TrucTuyen';
+          
           _isLoading = false;
         });
       }
@@ -86,6 +92,60 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _errorMessage = e.toString().replaceAll('Exception: ', '');
           _isLoading = false;
         });
+      }
+    }
+  }
+
+  // ---> BỔ SUNG TÍNH NĂNG ĐỔI TRẠNG THÁI: Hàm gọi API POST để cập nhật trạng thái mới <---
+  Future<void> _changeActiveStatus(bool newValue) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final maSp = prefs.getString('maSp'); // Gửi API này cần mã Shipper (maSp)
+
+      if (maSp == null || maSp.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Lỗi: Không tìm thấy mã Shipper!'), backgroundColor: Colors.red),
+        );
+        return;
+      }
+
+      // Xác định chuỗi trạng thái mới
+      final trangThaiMoi = newValue ? 'TrucTuyen' : 'NgoaiTuyen';
+
+      final body = {
+        "maShipper": maSp,
+        "trangThaiMoi": trangThaiMoi
+      };
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Đang cập nhật trạng thái...'), duration: Duration(seconds: 1)),
+      );
+
+      // Gọi API POST
+      await _apiService.post('/api/Shipper/doi-trang-thai-hoat-dong', body);
+
+      // Thành công thì cập nhật UI
+      if (mounted) {
+        setState(() {
+          _isOnline = newValue;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Đã chuyển sang: ${newValue ? "Đang nhận đơn" : "Ngoại tuyến"}'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      // Nếu thất bại thì báo lỗi, nút gạt sẽ tự giật về vị trí cũ do không setState
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Lỗi cập nhật: ${e.toString().replaceAll('Exception: ', '')}'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     }
   }
@@ -136,6 +196,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         _buildAvatarAndName(),
                         const SizedBox(height: 12),
                         _buildStatusBadge(),
+                        
+                        const SizedBox(height: 24),
+                        // ---> BỔ SUNG TÍNH NĂNG ĐỔI TRẠNG THÁI: Gọi Widget nút gạt ở đây <---
+                        _buildActiveStatusToggle(),
+                        
                         const SizedBox(height: 24),
                         _buildPerformanceStats(),
                         const SizedBox(height: 16),
@@ -145,6 +210,63 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ),
                 ),
+    );
+  }
+
+  // ---> BỔ SUNG TÍNH NĂNG ĐỔI TRẠNG THÁI: Giao diện (UI) của khu vực nút gạt <---
+  Widget _buildActiveStatusToggle() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              Icon(
+                _isOnline ? Icons.directions_bike : Icons.power_settings_new,
+                color: _isOnline ? Colors.green : Colors.grey,
+                size: 28,
+              ),
+              const SizedBox(width: 16),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Trạng thái hoạt động',
+                    style: TextStyle(
+                      fontSize: 16, 
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _isOnline ? 'Đang nhận đơn (Trực tuyến)' : 'Nghỉ ngơi (Ngoại tuyến)',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: _isOnline ? Colors.green : Colors.grey,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          Switch(
+            value: _isOnline,
+            activeColor: Colors.green,
+            onChanged: (value) {
+              // Khi người dùng bấm gạt nút, gọi API
+              _changeActiveStatus(value);
+            },
+          ),
+        ],
+      ),
     );
   }
 

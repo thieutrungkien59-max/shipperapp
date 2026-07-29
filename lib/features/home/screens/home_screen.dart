@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../models/don_hang_model.dart';
 import '../../../services/api_service.dart';
 import '../../../core/repositories/order_repository.dart';
@@ -14,7 +15,8 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+// ---> BƯỚC 1: Thêm "with WidgetsBindingObserver" vào class State <---
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // Quản lý tab hiện tại và tab trước đó
   int _currentIndex = 0;
   int _previousIndex = 0; 
@@ -25,18 +27,149 @@ class _HomeScreenState extends State<HomeScreen> {
   // Khai báo các biến để gọi API
   late OrderRepository _orderRepository;
   late Future<List<DonHangModel>> _futureOrders;
+  
+  // Các biến quản lý API và trạng thái Trực tuyến 
+  late ApiServices _apiService;
+  bool _isOnline = false;
+  bool _isUpdatingStatus = false; 
 
   @override
   void initState() {
     super.initState();
-    // Khởi tạo Repository với API Service
-    _orderRepository = OrderRepository(ApiServices());
     
-    // Gọi hàm lấy danh sách đơn hàng. 
-    // LƯU Ý: Tạm thời dùng mã shipper cứng (ví dụ: 'SHIPPER_01'). 
-    // Sau khi làm tính năng Đăng nhập, chúng ta sẽ lấy mã này từ dữ liệu User đã lưu.
+    // ---> BƯỚC 2: Đăng ký theo dõi vòng đời của app <---
+    WidgetsBinding.instance.addObserver(this);
+
+    // Khởi tạo API Service
+    _apiService = ApiServices();
+    _orderRepository = OrderRepository(_apiService);
+    
     _futureOrders = _orderRepository.getOrdersByShipper('SHIPPER_01'); 
+    
+    // ---> BƯỚC 3: Mặc định mở app lên là Ngoại tuyến <---
+    _forceOfflineSilently();
   }
+
+  @override
+  void dispose() {
+    // ---> BƯỚC 4: Hủy đăng ký theo dõi khi tắt màn hình để tránh lỗi bộ nhớ <---
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  // ---> BƯỚC 5: Hàm lắng nghe khi tắt app <---
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    
+    // 'detached' là trạng thái khi người dùng vuốt tắt ứng dụng hoàn toàn
+    // Bạn cũng có thể thêm 'paused' (thu nhỏ app) nếu muốn thu nhỏ app cũng mất Trực tuyến
+    if (state == AppLifecycleState.detached) {
+      if (_isOnline) {
+        _forceOfflineSilently();
+      }
+    }
+  }
+
+  // ---> BƯỚC 6: Hàm gọi API chuyển Ngoại tuyến "ngầm" (Không hiện thông báo, không loading) <---
+  Future<void> _forceOfflineSilently() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final maSp = prefs.getString('maSp');
+      
+      if (maSp != null && maSp.isNotEmpty) {
+        final body = {
+          "maShipper": maSp,
+          "trangThaiMoi": "NgoaiTuyen"
+        };
+
+        // Gọi API ép về Ngoại tuyến
+        await _apiService.post('/api/Shipper/doi-trang-thai-hoat-dong', body);
+        
+        if (mounted) {
+          setState(() {
+            _isOnline = false; // Tắt đèn giao diện
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Lỗi force offline: $e'); // In ra console thay vì báo lỗi trên màn hình
+    }
+  }
+
+  // ---> BỔ SUNG: Hàm đồng bộ trạng thái từ Backend <---
+  Future<void> _fetchInitialStatus() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final maTk = prefs.getString('maTk');
+      if (maTk != null && maTk.isNotEmpty) {
+        final response = await _apiService.get('/api/Auth/profile/$maTk');
+        if (mounted) {
+          setState(() {
+            final chiTiet = response['chiTiet'] ?? {};
+            final shipper = chiTiet['shipper'] ?? {};
+            _isOnline = shipper['trangThaiHoatDong'] == 'TrucTuyen';
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Lỗi lấy trạng thái ban đầu ở Home: $e');
+    }
+  } 
+  
+  // Hàm chuyển đổi trạng thái khi bấm nút trên màn hình (Giữ nguyên như cũ)
+  Future<void> _toggleOnlineStatus() async {
+    setState(() {
+      _isUpdatingStatus = true; 
+    });
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final maSp = prefs.getString('maSp');
+
+      if (maSp == null || maSp.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Lỗi: Không tìm thấy mã Shipper!')),
+        );
+        return;
+      }
+
+      final newValue = !_isOnline; 
+      final trangThaiMoi = newValue ? 'TrucTuyen' : 'NgoaiTuyen';
+
+      final body = {
+        "maShipper": maSp,
+        "trangThaiMoi": trangThaiMoi
+      };
+
+      await _apiService.post('/api/Shipper/doi-trang-thai-hoat-dong', body);
+
+      if (mounted) {
+        setState(() {
+          _isOnline = newValue;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Lỗi cập nhật: ${e.toString().replaceAll('Exception: ', '')}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUpdatingStatus = false;
+        });
+      }
+    }
+  }
+
+  // ====================================================================================
+  // PHẦN BÊN DƯỚI LÀ GIAO DIỆN UI BẠN CỨ GIỮ NGUYÊN (Hàm build, _buildAppBar, _buildHomeTab, v.v...)
+  // ====================================================================================
 
   @override
   Widget build(BuildContext context) {
@@ -92,6 +225,10 @@ class _HomeScreenState extends State<HomeScreen> {
             setState(() {
               _currentIndex = _previousIndex; 
             });
+            // ---> BỔ SUNG: Nếu quay về Home thì gọi lại API lấy trạng thái <---
+            if (_previousIndex == 0) {
+              _fetchInitialStatus();
+            }
           },
         );
       default:
@@ -126,19 +263,16 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Khu vực xử lý hiển thị API bằng FutureBuilder
   Widget _buildOrderSection() {
     return FutureBuilder<List<DonHangModel>>(
       future: _futureOrders,
       builder: (context, snapshot) {
-        // Trạng thái 1: Đang chờ tải dữ liệu từ API
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Padding(
             padding: EdgeInsets.all(32.0),
             child: Center(child: CircularProgressIndicator()),
           );
         } 
-        // Trạng thái 2: API trả về lỗi
         else if (snapshot.hasError) {
           return Padding(
             padding: const EdgeInsets.all(16.0),
@@ -151,7 +285,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           );
         } 
-        // Trạng thái 3: Call API thành công nhưng danh sách rỗng
         else if (!snapshot.hasData || snapshot.data!.isEmpty) {
           return const Padding(
             padding: EdgeInsets.all(16.0),
@@ -164,17 +297,17 @@ class _HomeScreenState extends State<HomeScreen> {
           );
         }
 
-        // Trạng thái 4: Có dữ liệu, lấy phần tử đầu tiên hiển thị lên Home
         final firstOrder = snapshot.data!.first;
         return _buildOrderCard(firstOrder);
       },
     );
   }
 
+  // ---> BỔ SUNG: Giao diện thẻ Trực tuyến (Thiết kế mới bám sát ảnh) <---
   Widget _buildStatusCard() {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+      padding: const EdgeInsets.symmetric(vertical: 24),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
@@ -182,28 +315,44 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       child: Column(
         children: [
-          ElevatedButton(
-            onPressed: () {},
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _primaryRed,
-              shape: RoundedRectangleBorder(
+          GestureDetector(
+            onTap: _isUpdatingStatus ? null : _toggleOnlineStatus,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 300), 
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 48),
+              decoration: BoxDecoration(
+                color: _isOnline ? _primaryRed : Colors.white, // Đổi nền 
                 borderRadius: BorderRadius.circular(30),
+                border: Border.all(
+                  color: _isOnline ? Colors.transparent : Colors.grey.shade400, // Thêm viền khi offline
+                  width: 1.5,
+                ),
               ),
-              padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 12),
-            ),
-            child: const Text(
-              'Trực tuyến',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
+              child: _isUpdatingStatus
+                  ? SizedBox(
+                      height: 22,
+                      width: 22,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: _isOnline ? Colors.white : _primaryRed, // Đổi màu vòng xoay tương phản với nền
+                      ),
+                    )
+                  : Text(
+                      _isOnline ? 'Trực tuyến' : 'Ngoại tuyến',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: _isOnline ? Colors.white : Colors.black87, // Đổi màu chữ
+                      ),
+                    ),
             ),
           ),
           const SizedBox(height: 12),
-          const Text(
-            'Bạn sẽ nhận đơn mới khi đang Trực tuyến',
-            style: TextStyle(color: Colors.grey, fontSize: 14),
+          Text(
+            _isOnline 
+                ? 'Bạn sẽ nhận đơn mới khi đang Trực tuyến'
+                : 'Đang nghỉ ngơi, bạn sẽ không nhận đơn',
+            style: const TextStyle(color: Colors.grey, fontSize: 14),
           ),
         ],
       ),
@@ -376,7 +525,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildNavItem(IconData icon, String label, int index) {
+ Widget _buildNavItem(IconData icon, String label, int index) {
     bool isActive = _currentIndex == index;
 
     return GestureDetector(
@@ -386,6 +535,11 @@ class _HomeScreenState extends State<HomeScreen> {
             _previousIndex = _currentIndex; 
             _currentIndex = index; 
           });
+          
+          // ---> BỔ SUNG: Khi bấm vào Tab 0 (Home), cập nhật lại trạng thái <---
+          if (index == 0) {
+            _fetchInitialStatus();
+          }
         }
       },
       child: AnimatedContainer(
