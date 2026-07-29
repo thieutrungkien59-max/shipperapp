@@ -46,29 +46,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       // 1. Lấy mã Shipper đã lưu lúc Đăng nhập
       final prefs = await SharedPreferences.getInstance();
-      final maSp = prefs.getString('maSp');
+      final maTk = prefs.getString('maTk');
 
-      if (maSp == null || maSp.isEmpty) {
+      if (maTk == null || maTk.isEmpty) {
         throw Exception('Không tìm thấy phiên đăng nhập. Vui lòng đăng nhập lại.');
       }
 
       // 2. Gọi API lấy thông tin (LƯU Ý: Thay đổi '/Shipper/$maSp' thành đúng đường dẫn Swagger của nhóm bạn)
-      final response = await _apiService.get('/Shipper/cccd');
-
+      final response = await _apiService.get('/api/Auth/profile/$maTk');
+      print('=== DỮ LIỆU PROFILE TRẢ VỀ: ===');
+      print(response);
+      print('=================================');
+      // 3. Cập nhật giao diện
       // 3. Cập nhật giao diện
       if (mounted) {
         setState(() {
-          _hoTen = response['hoTen'] ?? 'Chưa cập nhật';
-          _soDienThoai = response['soDienThoai'] ?? '';
-          _cccd = response['cccd'] ?? 'Đang trống';
-          _gplx = response['gplx'] ?? 'Đang trống';
-          _bienSoXe = response['bienSoXe'] ?? 'Đang trống';
-          _loaiPhuongTien = response['loaiPhuongTien'] ?? 'Đang trống';
-          _taiTrongToiDa = '${response['taiTrongToiDa'] ?? 0} kg';
+          // BƯỚC 1: Bóc tách lớp vỏ 'chiTiet' và 'shipper' ra trước
+          final chiTiet = response['chiTiet'] ?? {};
+          final shipper = chiTiet['shipper'] ?? {};
+
+          // BƯỚC 2: Map dữ liệu từ biến 'shipper' (Lưu ý viết thường chữ cái đầu)
+          _hoTen = shipper['hoTen'] ?? 'Chưa cập nhật';
+          _soDienThoai = shipper['soDienThoai'] ?? '';
+          _cccd = shipper['cccd'] ?? 'Đang trống';
+          _gplx = shipper['gplx'] ?? 'Đang trống';
+          _bienSoXe = shipper['bienSoXe'] ?? 'Đang trống';
+          _loaiPhuongTien = shipper['loaiPhuongTien'] ?? 'Đang trống';
+          _taiTrongToiDa = '${shipper['taiTrongToiDa'] ?? 0} kg';
           
-          // Kiểm tra trạng thái hồ sơ (Dựa theo giá trị Backend trả về)
-          final trangThai = response['trangThaiHoSo']?.toString().toLowerCase() ?? '';
-          _isApproved = trangThai.contains('daduyet') || trangThai.contains('đã duyệt');
+          // Kiểm tra trạng thái hồ sơ (Trường 'trangThai' nằm ở ngoài cùng response)
+          _isApproved = response['trangThai'] == true;
           
           _isLoading = false;
         });

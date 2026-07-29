@@ -15,15 +15,17 @@ class AuthRepository {
       };
       
       // Gọi đến endpoint đăng nhập
-      final response = await _apiService.post('/Auth/login', body);
+      final response = await _apiService.post('/api/Auth/login', body);
       
       // Trích xuất dữ liệu từ phản hồi của Backend
+      final maTk = response['maTk']; // BỔ SUNG LẤY MÃ TÀI KHOẢN
       final thongTin = response['thongTinChiTiet'];
       final maSp = thongTin['maSp'];
 
       // Lưu vào bộ nhớ cục bộ của điện thoại
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('maSp', maSp);
+      await prefs.setString('maTk', maTk); // BỔ SUNG LƯU MÃ TÀI KHOẢN
+      await prefs.setString('maSp', maSp); 
       
       // Tạm thời trả về true nếu không có lỗi văng ra
       return true; 
@@ -53,7 +55,7 @@ class AuthRepository {
         "gplx": gplx,
         "bienSoXe": bienSoXe,
         "loaiPhuongTien": loaiPhuongTien,
-        "taiTrongToiDa": taiTrongToiDa // Đã có thể truyền số liệu thật từ UI
+        "taiTrongToiDa": taiTrongToiDa
       };
       
       await _apiService.post('/Auth/register-shipper', body);

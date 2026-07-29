@@ -3,13 +3,14 @@ import 'package:http/http.dart' as http;
 
 class ApiServices {
   // Đường dẫn gốc gọi đến Backend Swagger (Local IP)
-  static const String baseUrl = 'http://192.168.1.251:5262/api';
+  static const String baseUrl = 'https://startle-kilogram-greeting.ngrok-free.dev';
 
   // Cấu hình Header mặc định cho mọi Request
   Map<String, String> _buildHeaders() {
     return {
       'Content-Type': 'application/json; charset=UTF-8',
       'Accept': 'application/json',
+      'ngrok-skip-browser-warning': 'true',
       // 'Authorization': 'Bearer $token', // Bỏ comment dòng này khi có Token đăng nhập
     };
   }
