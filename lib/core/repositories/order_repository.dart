@@ -9,7 +9,7 @@ class OrderRepository {
   // LẤY DANH SÁCH ĐƠN HÀNG THEO MÃ SHIPPER
   Future<List<DonHangModel>> getOrdersByShipper(String maShipper) async {
     try {
-      final response = await _apiService.get('/DonHang/danh-sach/$maShipper');
+      final response = await _apiService.get('/api/DonHang/shipper/$maShipper');
       
       // -- DEBUG: In ra cấu trúc thực tế để kiểm tra --
       print('=== DEBUG API ĐƠN HÀNG ===');
@@ -41,16 +41,22 @@ class OrderRepository {
     }
   }
 
-  // CẬP NHẬT TRẠNG THÁI ĐƠN HÀNG
-  Future<bool> updateOrderStatus(String maDonHang, String maShipper, String trangThaiMoi) async {
+  // CẬP NHẬT TRẠNG THÁI ĐƠN HÀNG (dùng để Shipper XÁC NHẬN NHẬN ĐƠN, giao thành công, huỷ, v.v.)
+  Future<bool> updateOrderStatus(
+    String maDonHang,
+    String maShipper,
+    String trangThaiMoi, {
+    String ghiChu = '',
+  }) async {
     try {
       final body = {
         "maDonHang": maDonHang,
+        "trangThaiMoi": trangThaiMoi,
         "maShipper": maShipper,
-        "trangThaiMoi": trangThaiMoi
+        "ghiChu": ghiChu,
       };
-      
-      await _apiService.put('/DonHang/cap-nhat-trang-thai', body);
+
+      await _apiService.post('/api/DonHang/cap-nhat-trang-thai', body);
       return true; 
     } catch (e) {
       throw Exception('Lỗi khi cập nhật trạng thái đơn: $e');

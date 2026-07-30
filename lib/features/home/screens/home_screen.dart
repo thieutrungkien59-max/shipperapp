@@ -26,7 +26,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   // Khai báo các biến để gọi API
   late OrderRepository _orderRepository;
-  late Future<List<DonHangModel>> _futureOrders;
+  Future<List<DonHangModel>> _futureOrders = Future.value(<DonHangModel>[]);
   
   // Các biến quản lý API và trạng thái Trực tuyến 
   late ApiServices _apiService;
@@ -44,9 +44,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _apiService = ApiServices();
     _orderRepository = OrderRepository(_apiService);
     
-    _futureOrders = _orderRepository.getOrdersByShipper('SHIPPER_01'); 
-    
-    // ---> BƯỚC 3: Mặc định mở app lên là Ngoại tuyến <---
+    // ---> BƯỚC 3: Mặc định mở app lên là Ngoại tuyến -> chưa gọi API đơn hàng <---
     _forceOfflineSilently();
   }
 
@@ -115,7 +113,40 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     } catch (e) {
       debugPrint('Lỗi lấy trạng thái ban đầu ở Home: $e');
     }
-  } 
+
+    // Đồng bộ danh sách đơn hàng theo đúng trạng thái vừa lấy được
+    if (_isOnline) {
+      await _loadOrders();
+    } else {
+      _clearOrders();
+    }
+  }
+
+  // ---> BỔ SUNG: Gọi API lấy đơn hàng khi đang Trực tuyến <---
+  Future<void> _loadOrders() async {
+    final prefs = await SharedPreferences.getInstance();
+    final maSp = prefs.getString('maSp');
+
+    if (maSp == null || maSp.isEmpty) {
+      debugPrint('Lỗi tải đơn hàng: Không tìm thấy mã Shipper trong bộ nhớ.');
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _futureOrders = _orderRepository.getOrdersByShipper(maSp);
+      });
+    }
+  }
+
+  // ---> BỔ SUNG: Xoá danh sách đơn hàng khi chuyển sang Ngoại tuyến (không gọi API) <---
+  void _clearOrders() {
+    if (mounted) {
+      setState(() {
+        _futureOrders = Future.value(<DonHangModel>[]);
+      });
+    }
+  }
   
   // Hàm chuyển đổi trạng thái khi bấm nút trên màn hình (Giữ nguyên như cũ)
   Future<void> _toggleOnlineStatus() async {
@@ -148,6 +179,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         setState(() {
           _isOnline = newValue;
         });
+      }
+
+      // ---> Trực tuyến: gọi API lấy đơn hàng | Ngoại tuyến: xoá danh sách, không gọi API <---
+      if (newValue) {
+        await _loadOrders();
+      } else {
+        _clearOrders();
       }
     } catch (e) {
       if (mounted) {
@@ -264,6 +302,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildOrderSection() {
+    // ---> Ngoại tuyến: không gọi API, hiển thị thông báo nhắc bật Trực tuyến <---
+    if (!_isOnline) {
+      return Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Center(
+          child: Column(
+            children: [
+              Icon(Icons.wifi_off_rounded, size: 32, color: Colors.grey.shade400),
+              const SizedBox(height: 8),
+              const Text(
+                'Bạn đang Ngoại tuyến.\nBật Trực tuyến để bắt đầu nhận đơn hàng.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey, fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return FutureBuilder<List<DonHangModel>>(
       future: _futureOrders,
       builder: (context, snapshot) {
@@ -479,7 +537,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => const OrderAcceptScreen(),
+                    builder: (context) => OrderAcceptScreen(order: order),
                   ),
                 );
               },

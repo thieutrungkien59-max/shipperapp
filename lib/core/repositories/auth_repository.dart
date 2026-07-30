@@ -58,7 +58,7 @@ class AuthRepository {
         "taiTrongToiDa": taiTrongToiDa
       };
       
-      await _apiService.post('/Auth/register-shipper', body);
+      await _apiService.post('/api/Auth/register-shipper', body);
       return true; 
     } catch (e) {
       throw Exception('Lỗi đăng ký: $e');

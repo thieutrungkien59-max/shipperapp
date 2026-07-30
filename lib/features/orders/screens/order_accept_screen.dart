@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../map_tracking/screens/map_delivery_screen.dart';
+import '../../../models/don_hang_model.dart';
+import '../../../services/api_service.dart';
+import '../../../core/repositories/order_repository.dart';
 
 class OrderAcceptScreen extends StatefulWidget {
-  const OrderAcceptScreen({Key? key}) : super(key: key);
+  final DonHangModel order;
+
+  const OrderAcceptScreen({Key? key, required this.order}) : super(key: key);
 
   @override
   State<OrderAcceptScreen> createState() => _OrderAcceptScreenState();
@@ -13,12 +19,20 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
   // Bộ đếm thời gian 30 giây
   int _timeLeft = 30;
   Timer? _timer;
+  bool _isAccepting = false;
+
+  // TODO: Xác nhận lại với backend giá trị trạng thái chính xác khi Shipper nhận đơn
+  // (ví dụ: "DaXacNhan", "DangLayHang"...). Đang tạm để "DaXacNhan".
+  static const String _trangThaiKhiNhanDon = 'DaXacNhan';
 
   final Color _primaryRed = const Color(0xFFE51D35);
+
+  late final OrderRepository _orderRepository;
 
   @override
   void initState() {
     super.initState();
+    _orderRepository = OrderRepository(ApiServices());
     _startTimer();
   }
 
@@ -42,15 +56,52 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
     super.dispose();
   }
 
-  void _handleAcceptOrder() {
+  Future<void> _handleAcceptOrder() async {
     _timer?.cancel();
-    // Bấm nhận đơn: Hủy timer, xóa màn hình hiện tại và chuyển sang MapDeliveryScreen
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (context) => const MapDeliveryScreen(),
-      ),
-    );
+
+    setState(() {
+      _isAccepting = true;
+    });
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final maSp = prefs.getString('maSp');
+
+      if (maSp == null || maSp.isEmpty) {
+        throw Exception('Không tìm thấy mã Shipper, vui lòng đăng nhập lại.');
+      }
+
+      // Gọi API thật để xác nhận nhận đơn
+      await _orderRepository.updateOrderStatus(
+        widget.order.id,
+        maSp,
+        _trangThaiKhiNhanDon,
+      );
+
+      if (!mounted) return;
+
+      // Nhận đơn thành công: xóa màn hình hiện tại và chuyển sang MapDeliveryScreen
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => const MapDeliveryScreen(),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isAccepting = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Lỗi nhận đơn: ${e.toString().replaceAll('Exception: ', '')}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        // Đơn vẫn còn hiệu lực trong thời gian còn lại nếu nhận đơn thất bại
+        _startTimer();
+      }
+    }
   }
 
   @override
@@ -169,9 +220,9 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
                     style: TextStyle(fontSize: 12, color: Colors.black54),
                   ),
                   const SizedBox(height: 4),
-                  const Text(
-                    'LR-VN-10293',
-                    style: TextStyle(
+                  Text(
+                    widget.order.id,
+                    style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 1.0,
@@ -201,7 +252,7 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
             width: double.infinity,
             height: 54,
             child: ElevatedButton(
-              onPressed: _handleAcceptOrder,
+              onPressed: _isAccepting ? null : _handleAcceptOrder,
               style: ElevatedButton.styleFrom(
                 backgroundColor: _primaryRed,
                 shape: RoundedRectangleBorder(
@@ -209,15 +260,24 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
                 ),
                 elevation: 0,
               ),
-              child: const Text(
-                'XÁC NHẬN ĐƠN',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                  letterSpacing: 0.5,
-                ),
-              ),
+              child: _isAccepting
+                  ? const SizedBox(
+                      height: 22,
+                      width: 22,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text(
+                      'XÁC NHẬN ĐƠN',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
             ),
           ),
           const SizedBox(height: 12),
