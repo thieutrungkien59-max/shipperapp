@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../services/api_service.dart'; // Đảm bảo đường dẫn này đúng với project của bạn
+import 'edit_profile_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   final VoidCallback onBackPressed;
@@ -24,6 +25,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String _bienSoXe = '';
   String _loaiPhuongTien = '';
   String _taiTrongToiDa = '';
+  int _taiTrongToiDaRaw = 0;
   bool _isApproved = false;
   
   // ---> BỔ SUNG TÍNH NĂNG ĐỔI TRẠNG THÁI: Biến lưu trạng thái online/offline <---
@@ -64,24 +66,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
       // 3. Cập nhật giao diện
       if (mounted) {
         setState(() {
-          // BƯỚC 1: Bóc tách lớp vỏ 'chiTiet' và 'shipper' ra trước
+          // BƯỚC 1: Bóc tách lớp vỏ 'chiTiet' ra (không có lớp 'shipper' lồng bên trong)
           final chiTiet = response['chiTiet'] ?? {};
-          final shipper = chiTiet['shipper'] ?? {};
 
-          // BƯỚC 2: Map dữ liệu từ biến 'shipper' (Lưu ý viết thường chữ cái đầu)
-          _hoTen = shipper['hoTen'] ?? 'Chưa cập nhật';
-          _soDienThoai = shipper['soDienThoai'] ?? '';
-          _cccd = shipper['cccd'] ?? 'Đang trống';
-          _gplx = shipper['gplx'] ?? 'Đang trống';
-          _bienSoXe = shipper['bienSoXe'] ?? 'Đang trống';
-          _loaiPhuongTien = shipper['loaiPhuongTien'] ?? 'Đang trống';
-          _taiTrongToiDa = '${shipper['taiTrongToiDa'] ?? 0} kg';
+          // BƯỚC 2: Map dữ liệu trực tiếp từ 'chiTiet'
+          _hoTen = chiTiet['hoTen'] ?? 'Chưa cập nhật';
+          _soDienThoai = chiTiet['soDienThoai'] ?? '';
+          _cccd = chiTiet['cccd'] ?? 'Đang trống';
+          _gplx = chiTiet['gplx'] ?? 'Đang trống';
+          _bienSoXe = chiTiet['bienSoXe'] ?? 'Đang trống';
+          _loaiPhuongTien = chiTiet['loaiPhuongTien'] ?? 'Đang trống';
+          _taiTrongToiDaRaw = (chiTiet['taiTrongToiDa'] is int)
+              ? chiTiet['taiTrongToiDa']
+              : int.tryParse('${chiTiet['taiTrongToiDa'] ?? 0}') ?? 0;
+          _taiTrongToiDa = '$_taiTrongToiDaRaw kg';
           
           // Kiểm tra trạng thái hồ sơ (Trường 'trangThai' nằm ở ngoài cùng response)
           _isApproved = response['trangThai'] == true;
           
           // ---> BỔ SUNG TÍNH NĂNG ĐỔI TRẠNG THÁI: Map dữ liệu TrucTuyen/NgoaiTuyen từ Backend <---
-          _isOnline = shipper['trangThaiHoatDong'] == 'TrucTuyen';
+          _isOnline = chiTiet['trangThaiHoatDong'] == 'TrucTuyen';
           
           _isLoading = false;
         });
@@ -185,8 +189,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             ),
                             IconButton(
                               icon: const Icon(Icons.edit, color: Colors.black54),
-                              onPressed: () {
-                                debugPrint('Mở tính năng chỉnh sửa hồ sơ');
+                              onPressed: () async {
+                                final result = await Navigator.push<bool>(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => EditProfileScreen(
+                                      hoTen: _hoTen,
+                                      soDienThoai: _soDienThoai,
+                                      cccd: _cccd,
+                                      gplx: _gplx,
+                                      bienSoXe: _bienSoXe,
+                                      loaiPhuongTien: _loaiPhuongTien,
+                                      taiTrongToiDa: _taiTrongToiDaRaw,
+                                    ),
+                                  ),
+                                );
+
+                                // Nếu lưu thành công, tải lại dữ liệu hồ sơ mới nhất
+                                if (result == true) {
+                                  setState(() => _isLoading = true);
+                                  _fetchProfileData();
+                                }
                               },
                             ),
                           ],

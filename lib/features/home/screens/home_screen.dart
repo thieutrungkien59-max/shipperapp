@@ -105,8 +105,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (mounted) {
           setState(() {
             final chiTiet = response['chiTiet'] ?? {};
-            final shipper = chiTiet['shipper'] ?? {};
-            _isOnline = shipper['trangThaiHoatDong'] == 'TrucTuyen';
+            _isOnline = chiTiet['trangThaiHoatDong'] == 'TrucTuyen';
           });
         }
       }

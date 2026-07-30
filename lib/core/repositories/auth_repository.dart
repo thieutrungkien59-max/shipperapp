@@ -18,9 +18,10 @@ class AuthRepository {
       final response = await _apiService.post('/api/Auth/login', body);
       
       // Trích xuất dữ liệu từ phản hồi của Backend
-      final maTk = response['maTk']; // BỔ SUNG LẤY MÃ TÀI KHOẢN
-      final thongTin = response['thongTinChiTiet'];
-      final maSp = thongTin['maSp'];
+      final user = response['user'];
+      final maTk = user['maTk'];
+      final chiTiet = user['chiTiet'];
+      final maSp = chiTiet['maSp'];
 
       // Lưu vào bộ nhớ cục bộ của điện thoại
       final prefs = await SharedPreferences.getInstance();
@@ -58,10 +59,39 @@ class AuthRepository {
         "taiTrongToiDa": taiTrongToiDa
       };
       
-      await _apiService.post('/api/Auth/register-shipper', body);
+      await _apiService.post('/Auth/register-shipper', body);
       return true; 
     } catch (e) {
       throw Exception('Lỗi đăng ký: $e');
+    }
+  }
+
+  // Hàm cập nhật thông tin hồ sơ Shipper
+  Future<bool> updateShipperProfile({
+    required String maSp,
+    required String hoTen,
+    required String soDienThoai,
+    required String cccd,
+    required String gplx,
+    required String bienSoXe,
+    required String loaiPhuongTien,
+    required int taiTrongToiDa,
+  }) async {
+    try {
+      final body = {
+        "hoTen": hoTen,
+        "soDienThoai": soDienThoai,
+        "cccd": cccd,
+        "gplx": gplx,
+        "bienSoXe": bienSoXe,
+        "loaiPhuongTien": loaiPhuongTien,
+        "taiTrongToiDa": taiTrongToiDa,
+      };
+
+      await _apiService.put('/api/Auth/update-shipper/$maSp', body);
+      return true;
+    } catch (e) {
+      throw Exception('Lỗi cập nhật hồ sơ: $e');
     }
   }
 }
