@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:ui';
 import '../../orders/screens/order_detail_screen.dart';
 import '../../order_proof/screens/camera_proof_screen.dart';
+import '../../orders/screens/delivery_failure_screen.dart';
 
 class MapDeliveryScreen extends StatefulWidget {
   const MapDeliveryScreen({Key? key}) : super(key: key);
@@ -268,6 +269,31 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
                       ),
                     ),
                   ),
+                  // Chỉ hiện lựa chọn báo cáo thất bại khi đang ở pha giao hàng (không áp dụng lúc lấy hàng)
+                  if (_isDeliveryPhase) ...[
+                    const SizedBox(height: 12),
+                    Center(
+                      child: TextButton(
+                        onPressed: () async {
+                          final reported = await Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (context) => const DeliveryFailureScreen()),
+                          );
+
+                          if (reported == true && mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Đã ghi nhận báo cáo giao thất bại.')),
+                            );
+                            Navigator.of(context).popUntil((route) => route.isFirst);
+                          }
+                        },
+                        child: Text(
+                          'Không thể giao hàng?',
+                          style: TextStyle(color: Colors.grey.shade700, fontWeight: FontWeight.bold, fontSize: 13, decoration: TextDecoration.underline),
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 24),
                 ],
               ),

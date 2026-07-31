@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../order_proof/screens/camera_proof_screen.dart';
+import 'order_handover_screen.dart';
 
 class OrderDetailScreen extends StatelessWidget {
   final bool isDeliveryPhase;
@@ -32,6 +33,11 @@ class OrderDetailScreen extends StatelessWidget {
                         _buildPackageInfoCard(),
                         const SizedBox(height: 16),
                         _buildDropoffCard(),
+                        // Chỉ cho phép bàn giao đơn cho shipper khác khi đang ở pha giao hàng
+                        if (isDeliveryPhase) ...[
+                          const SizedBox(height: 16),
+                          _buildHandoverActionCard(context),
+                        ],
                         const SizedBox(height: 24),
                       ],
                     ),
@@ -264,6 +270,45 @@ class OrderDetailScreen extends StatelessWidget {
           ),
           Icon(Icons.keyboard_arrow_down, color: Colors.grey.shade600),
         ],
+      ),
+    );
+  }
+
+  Widget _buildHandoverActionCard(BuildContext context) {
+    return GestureDetector(
+      onTap: () async {
+        final success = await Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const OrderHandoverScreen()),
+        );
+
+        if (success == true && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Đã bàn giao đơn hàng thành công.')),
+          );
+          Navigator.pop(context, true);
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.grey.shade200)),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: const BoxDecoration(color: Color(0xFFF5EBE9), shape: BoxShape.circle),
+              child: Icon(Icons.swap_horiz, color: Colors.grey.shade600, size: 20),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'Bàn giao đơn cho shipper khác',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+              ),
+            ),
+            Icon(Icons.keyboard_arrow_right, color: Colors.grey.shade600),
+          ],
+        ),
       ),
     );
   }
