@@ -5,62 +5,11 @@
 // home_screen.dart, vì home_screen.dart đã tự quản lý AppBar + BottomNav
 // dùng chung cho cả 4 tab (Home / Orders / Finance / Profile).
 import 'package:flutter/material.dart';
-
-enum OrderStatus { delivering, completed, failed }
-
-class OrderItem {
-  final String code;
-  final String customerName;
-  final String address;
-  final String price;
-  final String time;
-  final OrderStatus status;
-
-  const OrderItem({
-    required this.code,
-    required this.customerName,
-    required this.address,
-    required this.price,
-    required this.time,
-    required this.status,
-  });
-}
-
-// TODO: thay bằng dữ liệu thật từ DonHangModel / ApiService khi nối API
-const _mockOrders = [
-  OrderItem(
-    code: 'LR-VN-10293',
-    customerName: 'Nguyen Van A',
-    address: '123 Tran Hung Dao, Quan 1, TP HCM',
-    price: '450,000đ',
-    time: '10:30 24/05',
-    status: OrderStatus.delivering,
-  ),
-  OrderItem(
-    code: 'LR-VN-10290',
-    customerName: 'Tran Thi B',
-    address: '456 Le Loi, Quan 1, TP HCM',
-    price: '1,200,000đ',
-    time: '09:15 24/05',
-    status: OrderStatus.completed,
-  ),
-  OrderItem(
-    code: 'LR-VN-10285',
-    customerName: 'Le Van C',
-    address: '789 Nguyen Hue, Quan 1, TP HCM',
-    price: '0đ',
-    time: '08:30 24/05',
-    status: OrderStatus.failed,
-  ),
-  OrderItem(
-    code: 'LR-VN-10280',
-    customerName: 'Pham Thi D',
-    address: '321 Vo Van Tan, Quan 3, TP HCM',
-    price: '800,000đ',
-    time: '17:00 23/05',
-    status: OrderStatus.completed,
-  ),
-];
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../../models/don_hang_model.dart';
+import '../../../services/api_service.dart';
+import '../../../core/repositories/order_repository.dart';
+import '../../map_tracking/screens/map_delivery_screen.dart';
 
 class OrderListTab extends StatefulWidget {
   const OrderListTab({super.key});
@@ -76,20 +25,49 @@ class _OrderListTabState extends State<OrderListTab> {
   int _selectedTab = 0;
   final _tabs = const ['Tất cả', 'Đang xử lý', 'Hoàn tất', 'Thất bại'];
 
-  List<OrderItem> get _filteredOrders {
+  late final OrderRepository _orderRepository;
+  Future<List<DonHangModel>> _futureOrders = Future.value(<DonHangModel>[]);
+
+  @override
+  void initState() {
+    super.initState();
+    _orderRepository = OrderRepository(ApiServices());
+    _loadOrders();
+  }
+
+  Future<void> _loadOrders() async {
+    final prefs = await SharedPreferences.getInstance();
+    final maSp = prefs.getString('maSp');
+
+    if (maSp == null || maSp.isEmpty) {
+      setState(() {
+        _futureOrders = Future.error(Exception('Không tìm thấy mã Shipper, vui lòng đăng nhập lại.'));
+      });
+      return;
+    }
+
+    setState(() {
+      _futureOrders = _orderRepository.getOrdersByShipper(maSp);
+    });
+  }
+
+  // Nhóm các trạng thái kỹ thuật vào 3 nhóm hiển thị: Đang xử lý / Hoàn tất / Thất bại
+  // Đã xác nhận đủ 6 giá trị trạng thái với backend: ChoXacNhan, DaXacNhan, DangGiao,
+  // DaGiao, GiaoThatBai, DaHuy.
+  bool _isDangXuLy(String trangThai) => trangThai == 'ChoXacNhan' || trangThai == 'DaXacNhan' || trangThai == 'DangGiao';
+  bool _isHoanTat(String trangThai) => trangThai == 'DaGiao';
+  bool _isThatBai(String trangThai) => trangThai == 'GiaoThatBai' || trangThai == 'DaHuy';
+
+  List<DonHangModel> _filterOrders(List<DonHangModel> orders) {
     switch (_selectedTab) {
       case 1:
-        return _mockOrders
-            .where((o) => o.status == OrderStatus.delivering)
-            .toList();
+        return orders.where((o) => _isDangXuLy(o.trangThai)).toList();
       case 2:
-        return _mockOrders
-            .where((o) => o.status == OrderStatus.completed)
-            .toList();
+        return orders.where((o) => _isHoanTat(o.trangThai)).toList();
       case 3:
-        return _mockOrders.where((o) => o.status == OrderStatus.failed).toList();
+        return orders.where((o) => _isThatBai(o.trangThai)).toList();
       default:
-        return _mockOrders;
+        return orders;
     }
   }
 
@@ -101,12 +79,70 @@ class _OrderListTabState extends State<OrderListTab> {
         _buildFilterTabs(),
         const SizedBox(height: 12),
         Expanded(
-          child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            itemCount: _filteredOrders.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 14),
-            itemBuilder: (context, index) =>
-                _buildOrderCard(_filteredOrders[index]),
+          child: RefreshIndicator(
+            color: _primaryRed,
+            onRefresh: _loadOrders,
+            child: FutureBuilder<List<DonHangModel>>(
+              future: _futureOrders,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                if (snapshot.hasError) {
+                  return _buildMessageState(
+                    icon: Icons.error_outline,
+                    message: 'Lỗi tải đơn hàng: ${snapshot.error.toString().replaceAll('Exception: ', '')}',
+                  );
+                }
+
+                final orders = _filterOrders(snapshot.data ?? []);
+
+                if (orders.isEmpty) {
+                  return _buildMessageState(
+                    icon: Icons.inventory_2_outlined,
+                    message: 'Không có đơn hàng nào ở mục này.',
+                  );
+                }
+
+                return ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  itemCount: orders.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 14),
+                  itemBuilder: (context, index) => _buildOrderCard(orders[index]),
+                );
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMessageState({required IconData icon, required String message}) {
+    return ListView(
+      // Bọc trong ListView để RefreshIndicator vẫn vuốt để refresh được dù danh sách rỗng
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: [
+        SizedBox(
+          height: 320,
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 40, color: Colors.grey.shade400),
+                  const SizedBox(height: 12),
+                  Text(
+                    message,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.black54, fontSize: 14),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       ],
@@ -150,101 +186,140 @@ class _OrderListTabState extends State<OrderListTab> {
     );
   }
 
-  Widget _buildOrderCard(OrderItem order) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade200),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                order.code,
-                style: const TextStyle(
-                  fontSize: 14,
-                  color: Colors.black54,
-                  fontWeight: FontWeight.w500,
+  Widget _buildOrderCard(DonHangModel order) {
+    // Đơn đang trên đường giao -> cho phép bấm vào để mở bản đồ theo dõi
+    final bool isTrackable = order.trangThai == 'DangGiao';
+
+    return GestureDetector(
+      onTap: isTrackable
+          ? () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => MapDeliveryScreen(maDh: order.maDh)),
+              );
+            }
+          : null,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  order.maDh,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: Colors.black54,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
-              ),
-              _buildStatusBadge(order.status),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            order.customerName,
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: Colors.black87,
+                _buildStatusBadge(order.trangThai),
+              ],
             ),
-          ),
-          const SizedBox(height: 4),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(Icons.location_on_outlined,
-                  size: 16, color: Colors.grey.shade600),
-              const SizedBox(width: 4),
-              Expanded(
-                child: Text(
-                  order.address,
-                  style: const TextStyle(fontSize: 14, color: Colors.black54),
+            const SizedBox(height: 8),
+            Text(
+              order.tenNguoiNhan,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: Colors.black87,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.location_on_outlined, size: 16, color: Colors.grey.shade600),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    order.diaChiGiao,
+                    style: const TextStyle(fontSize: 14, color: Colors.black54),
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Divider(height: 1, color: Colors.grey.shade200),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                order.price,
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFFD98A3D),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Divider(height: 1, color: Colors.grey.shade200),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  '${order.tienCod.toStringAsFixed(0)}đ',
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFFD98A3D),
+                  ),
                 ),
-              ),
-              Text(
-                order.time,
-                style: const TextStyle(fontSize: 13, color: Colors.black54),
-              ),
-            ],
-          ),
-        ],
+                Text(
+                  order.ngayTao != null ? _formatDateTime(order.ngayTao!) : '',
+                  style: const TextStyle(fontSize: 13, color: Colors.black54),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildStatusBadge(OrderStatus status) {
+  String _formatDateTime(DateTime dt) {
+    final hh = dt.hour.toString().padLeft(2, '0');
+    final mm = dt.minute.toString().padLeft(2, '0');
+    final dd = dt.day.toString().padLeft(2, '0');
+    final mo = dt.month.toString().padLeft(2, '0');
+    return '$hh:$mm $dd/$mo';
+  }
+
+  Widget _buildStatusBadge(String trangThai) {
     late final String label;
     late final Color bgColor;
     late final Color textColor;
 
-    switch (status) {
-      case OrderStatus.delivering:
+    switch (trangThai) {
+      case 'ChoXacNhan':
+        label = 'Chờ xác nhận';
+        bgColor = const Color(0xFFF3E8D9);
+        textColor = const Color(0xFF9B7A2F);
+        break;
+      case 'DaXacNhan':
+        label = 'Đã xác nhận';
+        bgColor = const Color(0xFFFBDCE0);
+        textColor = const Color(0xFFC0392B);
+        break;
+      case 'DangGiao':
         label = 'Đang giao';
         bgColor = const Color(0xFFFBDCE0);
         textColor = const Color(0xFFC0392B);
         break;
-      case OrderStatus.completed:
+      case 'DaGiao':
         label = 'Hoàn tất';
         bgColor = const Color(0xFFD9F2E3);
         textColor = const Color(0xFF2E9E5B);
         break;
-      case OrderStatus.failed:
+      case 'GiaoThatBai':
         label = 'Giao thất bại';
         bgColor = const Color(0xFFFCE3C9);
         textColor = const Color(0xFFD07A2B);
         break;
+      case 'DaHuy':
+        label = 'Đã huỷ';
+        bgColor = const Color(0xFFE5E5E5);
+        textColor = const Color(0xFF616161);
+        break;
+      default:
+        label = trangThai;
+        bgColor = const Color(0xFFE5E5E5);
+        textColor = const Color(0xFF616161);
     }
 
     return Container(

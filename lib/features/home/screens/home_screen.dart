@@ -121,19 +121,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  // ---> BỔ SUNG: Gọi API lấy đơn hàng khi đang Trực tuyến <---
+  // ---> BỔ SUNG: Gọi API lấy DANH SÁCH ĐƠN CHỜ NHẬN khi đang Trực tuyến <---
+  // Lưu ý: Home hiển thị pool đơn "ChoXacNhan" (chưa gán cho ai) để Shipper có thể nhận,
+  // KHÔNG phải danh sách đơn đã thuộc về Shipper này (API đó dùng riêng cho tab Orders).
   Future<void> _loadOrders() async {
-    final prefs = await SharedPreferences.getInstance();
-    final maSp = prefs.getString('maSp');
-
-    if (maSp == null || maSp.isEmpty) {
-      debugPrint('Lỗi tải đơn hàng: Không tìm thấy mã Shipper trong bộ nhớ.');
-      return;
-    }
-
     if (mounted) {
       setState(() {
-        _futureOrders = _orderRepository.getOrdersByShipper(maSp);
+        _futureOrders = _orderRepository.getOrdersAvailableToAccept();
       });
     }
   }
@@ -465,6 +459,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
+  // Chuyển mã trạng thái kỹ thuật sang nhãn tiếng Việt dễ đọc
+  String _trangThaiLabel(String trangThai) {
+    switch (trangThai) {
+      case 'ChoXacNhan':
+        return 'Chờ xác nhận';
+      case 'DaXacNhan':
+        return 'Đã xác nhận';
+      case 'DangGiao':
+        return 'Đang giao';
+      case 'DaGiao':
+        return 'Đã giao';
+      case 'GiaoThatBai':
+        return 'Giao thất bại';
+      case 'DaHuy':
+        return 'Đã huỷ';
+      default:
+        return trangThai;
+    }
+  }
+
   Widget _buildOrderCard(DonHangModel order) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -480,7 +494,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                order.id, 
+                order.maDh, 
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 14,
@@ -493,7 +507,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  order.status, 
+                  _trangThaiLabel(order.trangThai), 
                   style: TextStyle(
                     color: _primaryRed,
                     fontWeight: FontWeight.bold,
@@ -509,7 +523,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               Icon(Icons.person_outline, size: 20, color: Colors.grey.shade600),
               const SizedBox(width: 8),
               Text(
-                order.customerName, 
+                order.tenNguoiNhan, 
                 style: const TextStyle(fontSize: 15),
               ),
             ],
@@ -522,7 +536,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  order.address, 
+                  order.diaChiGiao, 
                   style: const TextStyle(fontSize: 15),
                 ),
               ),
@@ -536,7 +550,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => OrderAcceptScreen(order: order),
+                    builder: (context) => OrderAcceptScreen(maDh: order.maDh),
                   ),
                 );
               },

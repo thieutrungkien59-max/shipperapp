@@ -35,8 +35,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late final TextEditingController _cccdCtrl;
   late final TextEditingController _gplxCtrl;
   late final TextEditingController _bienSoXeCtrl;
-  late final TextEditingController _loaiPhuongTienCtrl;
   late final TextEditingController _taiTrongToiDaCtrl;
+
+  // Loại phương tiện dùng Dropdown thay vì nhập tay, đồng bộ với màn Đăng ký
+  static const List<String> _phuongTienOptions = ['Xe máy', 'Xe ba gác', 'Xe tải nhỏ', 'Xe bán tải'];
+  late String _selectedPhuongTien;
 
   bool _isSaving = false;
 
@@ -59,7 +62,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _cccdCtrl = TextEditingController(text: clean(widget.cccd));
     _gplxCtrl = TextEditingController(text: clean(widget.gplx));
     _bienSoXeCtrl = TextEditingController(text: clean(widget.bienSoXe));
-    _loaiPhuongTienCtrl = TextEditingController(text: clean(widget.loaiPhuongTien));
+    _selectedPhuongTien = _phuongTienOptions.contains(widget.loaiPhuongTien)
+        ? widget.loaiPhuongTien
+        : _phuongTienOptions.first;
     _taiTrongToiDaCtrl = TextEditingController(
       text: widget.taiTrongToiDa > 0 ? widget.taiTrongToiDa.toString() : '',
     );
@@ -72,7 +77,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _cccdCtrl.dispose();
     _gplxCtrl.dispose();
     _bienSoXeCtrl.dispose();
-    _loaiPhuongTienCtrl.dispose();
     _taiTrongToiDaCtrl.dispose();
     super.dispose();
   }
@@ -97,7 +101,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         cccd: _cccdCtrl.text.trim(),
         gplx: _gplxCtrl.text.trim(),
         bienSoXe: _bienSoXeCtrl.text.trim(),
-        loaiPhuongTien: _loaiPhuongTienCtrl.text.trim(),
+        loaiPhuongTien: _selectedPhuongTien,
         taiTrongToiDa: int.tryParse(_taiTrongToiDaCtrl.text.trim()) ?? 0,
       );
 
@@ -170,10 +174,35 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 icon: Icons.two_wheeler_outlined,
               ),
               const SizedBox(height: 14),
-              _buildField(
-                controller: _loaiPhuongTienCtrl,
-                label: 'Loại phương tiện',
-                icon: Icons.local_shipping_outlined,
+              DropdownButtonFormField<String>(
+                value: _selectedPhuongTien,
+                decoration: InputDecoration(
+                  labelText: 'Loại phương tiện',
+                  prefixIcon: Icon(Icons.local_shipping_outlined, color: Colors.grey.shade600),
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.grey.shade200),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.grey.shade200),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: _primaryRed),
+                  ),
+                ),
+                items: _phuongTienOptions
+                    .map((value) => DropdownMenuItem<String>(
+                          value: value,
+                          child: Text(value),
+                        ))
+                    .toList(),
+                onChanged: (newValue) {
+                  setState(() => _selectedPhuongTien = newValue!);
+                },
               ),
               const SizedBox(height: 14),
               _buildField(

@@ -7,19 +7,25 @@ import '../../../services/api_service.dart';
 import '../../../core/repositories/order_repository.dart';
 
 class OrderAcceptScreen extends StatefulWidget {
-  final DonHangModel order;
+  final String maDh;
 
-  const OrderAcceptScreen({Key? key, required this.order}) : super(key: key);
+  const OrderAcceptScreen({Key? key, required this.maDh}) : super(key: key);
 
   @override
   State<OrderAcceptScreen> createState() => _OrderAcceptScreenState();
 }
 
 class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
-  // Bộ đếm thời gian 30 giây
+  // Bộ đếm thời gian 30 giây (chỉ chạy sau khi đã tải xong dữ liệu)
   int _timeLeft = 30;
   Timer? _timer;
   bool _isAccepting = false;
+
+  // Trạng thái tải dữ liệu chi tiết đơn hàng + thông tin xe của Shipper
+  bool _isLoading = true;
+  String? _loadError;
+  DonHangModel? _order;
+  double _taiTrongXe = 0;
 
   // TODO: Xác nhận lại với backend giá trị trạng thái chính xác khi Shipper nhận đơn
   // (ví dụ: "DaXacNhan", "DangLayHang"...). Đang tạm để "DaXacNhan".
@@ -28,15 +34,64 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
   final Color _primaryRed = const Color(0xFFE51D35);
 
   late final OrderRepository _orderRepository;
+  late final ApiServices _apiService;
+
+  // Đơn hàng có vượt tải trọng tối đa xe của Shipper hay không
+  bool get _isOverWeight => _order != null && _order!.khoiLuong > _taiTrongXe && _taiTrongXe > 0;
 
   @override
   void initState() {
     super.initState();
-    _orderRepository = OrderRepository(ApiServices());
-    _startTimer();
+    _apiService = ApiServices();
+    _orderRepository = OrderRepository(_apiService);
+    _loadData();
+  }
+
+  Future<void> _loadData() async {
+    setState(() {
+      _isLoading = true;
+      _loadError = null;
+    });
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final maTk = prefs.getString('maTk');
+
+      // Gọi song song: chi tiết đơn hàng + hồ sơ Shipper (để lấy tải trọng tối đa xe)
+      final results = await Future.wait([
+        _orderRepository.getOrderDetail(widget.maDh),
+        if (maTk != null && maTk.isNotEmpty) _apiService.get('/api/Auth/profile/$maTk') else Future.value(null),
+      ]);
+
+      final order = results[0] as DonHangModel;
+      final profileResponse = results[1];
+
+      double taiTrong = 0;
+      if (profileResponse != null && profileResponse is Map) {
+        final chiTiet = profileResponse['chiTiet'] ?? {};
+        final raw = chiTiet['taiTrongToiDa'];
+        taiTrong = (raw is num) ? raw.toDouble() : double.tryParse('$raw') ?? 0;
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _order = order;
+        _taiTrongXe = taiTrong;
+        _isLoading = false;
+      });
+
+      _startTimer();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadError = e.toString().replaceAll('Exception: ', '');
+        _isLoading = false;
+      });
+    }
   }
 
   void _startTimer() {
+    _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_timeLeft > 0) {
         setState(() {
@@ -57,6 +112,8 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
   }
 
   Future<void> _handleAcceptOrder() async {
+    if (_order == null || _isOverWeight) return;
+
     _timer?.cancel();
 
     setState(() {
@@ -73,7 +130,7 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
 
       // Gọi API thật để xác nhận nhận đơn
       await _orderRepository.updateOrderStatus(
-        widget.order.id,
+        _order!.maDh,
         maSp,
         _trangThaiKhiNhanDon,
       );
@@ -84,7 +141,7 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (context) => const MapDeliveryScreen(),
+          builder: (context) => MapDeliveryScreen(maDh: _order!.maDh),
         ),
       );
     } catch (e) {
@@ -121,31 +178,60 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
           ),
         ),
         child: SafeArea(
-          child: Column(
-            children: [
-              // Đã giảm bớt chiều cao các SizedBox ở đây để thẻ có thêm không gian
-              const SizedBox(height: 16), 
-              const Text(
-                'ĐƠN HÀNG MỚI',
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                  color: Colors.black87,
-                  letterSpacing: 1.2,
-                ),
-              ),
-              const SizedBox(height: 20),
-              _buildTimerCircle(),
-              const SizedBox(height: 24), // Thu gọn khoảng cách từ 40 xuống 24
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                  child: _buildOrderDetailsCard(),
-                ),
-              ),
-              const SizedBox(height: 16), // Đẩy đáy thẻ lên một chút cho thoáng
-            ],
-          ),
+          child: _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : _loadError != null
+                  ? _buildErrorState()
+                  : Column(
+                      children: [
+                        const SizedBox(height: 16),
+                        const Text(
+                          'ĐƠN HÀNG MỚI',
+                          style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.black87,
+                            letterSpacing: 1.2,
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        _buildTimerCircle(),
+                        const SizedBox(height: 24),
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                            child: _buildOrderDetailsCard(),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+                    ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildErrorState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, color: Colors.red, size: 40),
+            const SizedBox(height: 12),
+            Text(
+              'Không tải được chi tiết đơn hàng:\n$_loadError',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.black54),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _loadData,
+              style: ElevatedButton.styleFrom(backgroundColor: _primaryRed),
+              child: const Text('Thử lại', style: TextStyle(color: Colors.white)),
+            ),
+          ],
         ),
       ),
     );
@@ -192,6 +278,8 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
   }
 
   Widget _buildOrderDetailsCard() {
+    final order = _order!;
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -206,7 +294,6 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
           ),
         ],
       ),
-      // Sử dụng Column ở ngoài cùng để chia bố cục
       child: Column(
         children: [
           // 1. PHẦN THÔNG TIN ĐƠN HÀNG (CÓ THỂ CUỘN)
@@ -221,7 +308,7 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    widget.order.id,
+                    order.maDh,
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -232,15 +319,19 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
                     padding: EdgeInsets.symmetric(vertical: 16.0),
                     child: Divider(height: 1, thickness: 1),
                   ),
-                  _buildTimeline(),
+                  _buildTimeline(order),
                   const SizedBox(height: 20),
-                  _buildDistanceTimeBox(),
+                  _buildReceiverBox(order),
                   const Padding(
                     padding: EdgeInsets.symmetric(vertical: 16.0),
                     child: Divider(height: 1, thickness: 1),
                   ),
-                  _buildPriceWeightRow(),
-                  const SizedBox(height: 16), // Tạo chút khoảng trống ở cuối phần cuộn
+                  _buildPriceWeightRow(order),
+                  if (_isOverWeight) ...[
+                    const SizedBox(height: 14),
+                    _buildOverWeightWarning(order),
+                  ],
+                  const SizedBox(height: 16),
                 ],
               ),
             ),
@@ -252,9 +343,9 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
             width: double.infinity,
             height: 54,
             child: ElevatedButton(
-              onPressed: _isAccepting ? null : _handleAcceptOrder,
+              onPressed: (_isAccepting || _isOverWeight) ? null : _handleAcceptOrder,
               style: ElevatedButton.styleFrom(
-                backgroundColor: _primaryRed,
+                backgroundColor: _isOverWeight ? Colors.grey.shade400 : _primaryRed,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -269,9 +360,9 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
                         color: Colors.white,
                       ),
                     )
-                  : const Text(
-                      'XÁC NHẬN ĐƠN',
-                      style: TextStyle(
+                  : Text(
+                      _isOverWeight ? 'VƯỢT TẢI TRỌNG XE' : 'XÁC NHẬN ĐƠN',
+                      style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
                         color: Colors.white,
@@ -287,7 +378,7 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
     );
   }
 
-  Widget _buildTimeline() {
+  Widget _buildTimeline(DonHangModel order) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -312,7 +403,7 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
                 children: [
                   const Text('Địa chỉ lấy hàng', style: TextStyle(color: Colors.black54, fontSize: 12)),
                   const SizedBox(height: 2),
-                  const Text('45 Lê Duẩn, Quận 1, TP.HCM', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                  Text(order.diaChiLay, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
                 ],
               ),
             ),
@@ -329,7 +420,7 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
                 children: [
                   const Text('Địa chỉ giao hàng', style: TextStyle(color: Colors.black54, fontSize: 12)),
                   const SizedBox(height: 2),
-                  const Text('12 Thảo Điền, Quận 2, TP.HCM', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                  Text(order.diaChiGiao, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
                 ],
               ),
             ),
@@ -339,7 +430,7 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
     );
   }
 
-  Widget _buildDistanceTimeBox() {
+  Widget _buildReceiverBox(DonHangModel order) {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
       decoration: BoxDecoration(
@@ -352,14 +443,20 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
           Expanded(
             child: Row(
               children: [
-                Icon(Icons.route_outlined, color: Colors.grey.shade700, size: 20),
+                Icon(Icons.person_outline, color: Colors.grey.shade700, size: 20),
                 const SizedBox(width: 8),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    Text('Khoảng cách:', style: TextStyle(fontSize: 12, color: Colors.black54)),
-                    Text('3.2 km', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
-                  ],
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Người nhận:', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                      Text(
+                        order.tenNguoiNhan,
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -369,13 +466,13 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.access_time, color: Colors.grey.shade700, size: 20),
+                Icon(Icons.phone_outlined, color: Colors.grey.shade700, size: 20),
                 const SizedBox(width: 8),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    Text('Dự kiến:', style: TextStyle(fontSize: 12, color: Colors.black54)),
-                    Text('15 phút', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                  children: [
+                    const Text('SĐT:', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                    Text(order.sdtNguoiNhan, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
                   ],
                 ),
               ],
@@ -386,16 +483,23 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
     );
   }
 
-  Widget _buildPriceWeightRow() {
+  Widget _buildPriceWeightRow(DonHangModel order) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: const [
-            Text('Trọng lượng', style: TextStyle(fontSize: 12, color: Colors.black54)),
-            SizedBox(height: 4),
-            Text('12.5 kg', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+          children: [
+            const Text('Khối lượng', style: TextStyle(fontSize: 12, color: Colors.black54)),
+            const SizedBox(height: 4),
+            Text(
+              '${order.khoiLuong} kg',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+                color: _isOverWeight ? Colors.red : Colors.black87,
+              ),
+            ),
           ],
         ),
         Column(
@@ -404,7 +508,7 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
             const Text('Thu hộ COD (VNĐ)', style: TextStyle(fontSize: 12, color: Colors.black54)),
             const SizedBox(height: 4),
             Text(
-              '450.000',
+              order.tienCod.toStringAsFixed(0),
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
@@ -414,6 +518,30 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
           ],
         ),
       ],
+    );
+  }
+
+  Widget _buildOverWeightWarning(DonHangModel order) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.red.shade50,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.red.shade200),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.warning_amber_rounded, color: Colors.red.shade700, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Khối lượng đơn (${order.khoiLuong} kg) vượt quá tải trọng tối đa xe của bạn '
+              '(${_taiTrongXe.toStringAsFixed(0)} kg). Bạn không thể nhận đơn này.',
+              style: TextStyle(color: Colors.red.shade700, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

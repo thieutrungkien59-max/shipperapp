@@ -21,6 +21,8 @@ class ApiServices {
     try {
       final response = await http.get(url, headers: _buildHeaders());
       return _handleResponse(response);
+    } on Exception {
+      rethrow; // Lỗi HTTP (400/401/403/404/500...) đã có thông báo rõ ràng từ _handleResponse, không bọc lại
     } catch (e) {
       throw Exception('Lỗi kết nối mạng: $e');
     }
@@ -36,6 +38,8 @@ class ApiServices {
         body: jsonEncode(body),
       );
       return _handleResponse(response);
+    } on Exception {
+      rethrow;
     } catch (e) {
       throw Exception('Lỗi kết nối mạng: $e');
     }
@@ -50,6 +54,8 @@ class ApiServices {
         body: jsonEncode(body),
       );
       return _handleResponse(response);
+    } on Exception {
+      rethrow;
     } catch (e) {
       throw Exception('Lỗi kết nối mạng: $e');
     }
@@ -61,20 +67,35 @@ class ApiServices {
       // Thành công: Chuyển đổi chuỗi JSON thành đối tượng Dart
       return jsonDecode(response.body);
     } else {
+      // Cố gắng lấy message lỗi thật do backend trả về (thường nằm trong body dạng JSON)
+      String? serverMessage;
+      try {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map) {
+          serverMessage = decoded['message'] ?? decoded['title'] ?? decoded['error'];
+        } else if (decoded is String && decoded.isNotEmpty) {
+          serverMessage = decoded;
+        }
+      } catch (_) {
+        // Body không phải JSON (vd HTML trang lỗi) -> bỏ qua, dùng message mặc định
+      }
+
       // Thất bại: Bắt các mã lỗi phổ biến và quăng Exception
       switch (response.statusCode) {
         case 400:
-          throw Exception('Yêu cầu không hợp lệ (400)');
+          throw Exception(serverMessage ?? 'Yêu cầu không hợp lệ (400)');
         case 401:
           throw Exception('Sai tài khoản/mật khẩu hoặc hết phiên đăng nhập (401)');
         case 403:
           throw Exception('Không có quyền truy cập (403)');
         case 404:
-          throw Exception('Không tìm thấy dữ liệu (404)');
+          throw Exception(serverMessage ?? 'Không tìm thấy dữ liệu (404)');
         case 500:
-          throw Exception('Lỗi máy chủ nội bộ (500)');
+          throw Exception(
+            serverMessage != null ? 'Lỗi máy chủ (500): $serverMessage' : 'Lỗi máy chủ nội bộ (500)',
+          );
         default:
-          throw Exception('Đã xảy ra lỗi: ${response.statusCode}');
+          throw Exception(serverMessage ?? 'Đã xảy ra lỗi: ${response.statusCode}');
       }
     }
   }

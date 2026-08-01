@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import '../../order_proof/screens/camera_proof_screen.dart';
-import 'order_handover_screen.dart';
+import '../../../models/don_hang_model.dart';
 
 class OrderDetailScreen extends StatelessWidget {
   final bool isDeliveryPhase;
+  final DonHangModel order;
 
-  const OrderDetailScreen({Key? key, this.isDeliveryPhase = false}) : super(key: key);
+  const OrderDetailScreen({Key? key, this.isDeliveryPhase = false, required this.order}) : super(key: key);
 
   final Color _primaryRed = const Color(0xFFE51D35);
   final Color _successGreen = const Color(0xFF28A745);
@@ -33,11 +34,6 @@ class OrderDetailScreen extends StatelessWidget {
                         _buildPackageInfoCard(),
                         const SizedBox(height: 16),
                         _buildDropoffCard(),
-                        // Chỉ cho phép bàn giao đơn cho shipper khác khi đang ở pha giao hàng
-                        if (isDeliveryPhase) ...[
-                          const SizedBox(height: 16),
-                          _buildHandoverActionCard(context),
-                        ],
                         const SizedBox(height: 24),
                       ],
                     ),
@@ -69,7 +65,7 @@ class OrderDetailScreen extends StatelessWidget {
           ),
           const SizedBox(height: 2),
           Text(
-            'LR-VN-10293',
+            order.maDh,
             style: TextStyle(color: Colors.grey.shade600, fontSize: 13, fontWeight: FontWeight.normal),
           ),
         ],
@@ -173,7 +169,7 @@ class OrderDetailScreen extends StatelessWidget {
         children: [
           Text('ĐỊA CHỈ LẤY HÀNG', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey.shade600)),
           const SizedBox(height: 8),
-          const Text('45 Lê Duẩn, Quận 1, TP.HCM', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          Text(order.diaChiLay, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           const SizedBox(height: 16),
           Row(
             children: [
@@ -210,23 +206,13 @@ class OrderDetailScreen extends StatelessWidget {
         children: [
           Text('THÔNG TIN GÓI HÀNG', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey.shade600)),
           const SizedBox(height: 16),
-          _buildInfoRow('Khối lượng (kg):', '12.5'),
+          _buildInfoRow('Khối lượng (kg):', '${order.khoiLuong}'),
           const SizedBox(height: 16),
-          _buildInfoRow('Kích thước (D x R x C):', '30x20x15'),
+          _buildInfoRow('Kích thước (D x R x C):', order.kichThuoc ?? 'Chưa cập nhật'),
           const SizedBox(height: 16),
-          _buildInfoRow('Số tiền thu hộ COD (VNĐ):', '450.000', valueColor: Colors.orange.shade700),
+          _buildInfoRow('Số tiền thu hộ COD (VNĐ):', order.tienCod.toStringAsFixed(0), valueColor: Colors.orange.shade700),
           const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('Khung giờ lấy hàng:', style: TextStyle(fontSize: 14, color: Colors.grey.shade700)),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(color: const Color(0xFFF2E5E0), borderRadius: BorderRadius.circular(6)),
-                child: const Text('14:00 - 15:30', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-              ),
-            ],
-          ),
+          _buildInfoRow('Phí giao hàng (VNĐ):', order.phiGiaoHang.toStringAsFixed(0)),
         ],
       ),
     );
@@ -260,9 +246,9 @@ class OrderDetailScreen extends StatelessWidget {
               children: [
                 Text('GIAO ĐẾN', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey.shade600)),
                 const SizedBox(height: 4),
-                const Text(
-                  '12 Thảo Điền, Quận 2, TP.H...',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                Text(
+                  order.diaChiGiao,
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                   maxLines: 1, overflow: TextOverflow.ellipsis,
                 ),
               ],
@@ -270,45 +256,6 @@ class OrderDetailScreen extends StatelessWidget {
           ),
           Icon(Icons.keyboard_arrow_down, color: Colors.grey.shade600),
         ],
-      ),
-    );
-  }
-
-  Widget _buildHandoverActionCard(BuildContext context) {
-    return GestureDetector(
-      onTap: () async {
-        final success = await Navigator.push(
-          context,
-          MaterialPageRoute(builder: (context) => const OrderHandoverScreen()),
-        );
-
-        if (success == true && context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Đã bàn giao đơn hàng thành công.')),
-          );
-          Navigator.pop(context, true);
-        }
-      },
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.grey.shade200)),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: const BoxDecoration(color: Color(0xFFF5EBE9), shape: BoxShape.circle),
-              child: Icon(Icons.swap_horiz, color: Colors.grey.shade600, size: 20),
-            ),
-            const SizedBox(width: 12),
-            const Expanded(
-              child: Text(
-                'Bàn giao đơn cho shipper khác',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-              ),
-            ),
-            Icon(Icons.keyboard_arrow_right, color: Colors.grey.shade600),
-          ],
-        ),
       ),
     );
   }
@@ -327,7 +274,7 @@ class OrderDetailScreen extends StatelessWidget {
               // 1. Chuyển sang Camera và đợi kết quả
               final success = await Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => CameraProofScreen(isDeliveryPhase: isDeliveryPhase)),
+                MaterialPageRoute(builder: (context) => CameraProofScreen(isDeliveryPhase: isDeliveryPhase, maDh: order.maDh)),
               );
 
               // 2. Nếu thành công, tự đóng màn hình Chi tiết này và truyền tín hiệu 'true' về cho Bản đồ

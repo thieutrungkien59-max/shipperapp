@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 
 class CameraProofScreen extends StatefulWidget {
   final bool isDeliveryPhase;
-  
-  const CameraProofScreen({Key? key, required this.isDeliveryPhase}) : super(key: key);
+  final String maDh;
+
+  const CameraProofScreen({Key? key, required this.isDeliveryPhase, required this.maDh}) : super(key: key);
 
   @override
   State<CameraProofScreen> createState() => _CameraProofScreenState();
@@ -104,7 +105,7 @@ class _CameraProofScreenState extends State<CameraProofScreen> {
           ),
           const SizedBox(height: 2),
           Text(
-            'LR-VN-10293',
+            widget.maDh,
             style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
           ),
         ],
