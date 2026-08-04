@@ -4,6 +4,10 @@
 // Đây là widget NỘI DUNG để nhúng vào case trong _buildBodyContent() của
 // home_screen.dart, vì home_screen.dart đã tự quản lý AppBar + BottomNav
 // dùng chung cho cả 4 tab (Home / Orders / Finance / Profile).
+//
+// MỤC ĐÍCH: hiển thị các đơn Shipper ĐÃ VÀ ĐANG PHỤ TRÁCH (mọi trạng thái:
+// DaXacNhan, DangGiao, DaGiao, GiaoThatBai, DaHuy) — KHÔNG bao gồm đơn
+// "ChoXacNhan" (đơn đó thuộc pool ở màn Home, chưa gán cho Shipper nào).
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../models/don_hang_model.dart';
@@ -19,7 +23,6 @@ class OrderListTab extends StatefulWidget {
 }
 
 class _OrderListTabState extends State<OrderListTab> {
-  // Dùng chung màu đỏ với home_screen.dart để đồng bộ giao diện
   static const Color _primaryRed = Color(0xFFE51D35);
 
   int _selectedTab = 0;
@@ -52,22 +55,24 @@ class _OrderListTabState extends State<OrderListTab> {
   }
 
   // Nhóm các trạng thái kỹ thuật vào 3 nhóm hiển thị: Đang xử lý / Hoàn tất / Thất bại
-  // Đã xác nhận đủ 6 giá trị trạng thái với backend: ChoXacNhan, DaXacNhan, DangGiao,
-  // DaGiao, GiaoThatBai, DaHuy.
-  bool _isDangXuLy(String trangThai) => trangThai == 'ChoXacNhan' || trangThai == 'DaXacNhan' || trangThai == 'DangGiao';
+  bool _isDangXuLy(String trangThai) => trangThai == 'DaXacNhan' || trangThai == 'DangGiao';
   bool _isHoanTat(String trangThai) => trangThai == 'DaGiao';
-  bool _isThatBai(String trangThai) => trangThai == 'GiaoThatBai' || trangThai == 'DaHuy';
+  bool _isThatBai(String trangThai) => trangThai == 'GiaoThatBai' || trangThai == 'DaHuy' || trangThai == 'HuyTraHang';
 
   List<DonHangModel> _filterOrders(List<DonHangModel> orders) {
+    // Phòng hờ: loại bỏ "ChoXacNhan" khỏi mọi tab, kể cả tab "Tất cả" -> đơn đó
+    // thuộc pool nhận đơn ở Home, không phải đơn Shipper đang phụ trách.
+    final ownedOrders = orders.where((o) => o.trangThai != 'ChoXacNhan').toList();
+
     switch (_selectedTab) {
       case 1:
-        return orders.where((o) => _isDangXuLy(o.trangThai)).toList();
+        return ownedOrders.where((o) => _isDangXuLy(o.trangThai)).toList();
       case 2:
-        return orders.where((o) => _isHoanTat(o.trangThai)).toList();
+        return ownedOrders.where((o) => _isHoanTat(o.trangThai)).toList();
       case 3:
-        return orders.where((o) => _isThatBai(o.trangThai)).toList();
+        return ownedOrders.where((o) => _isThatBai(o.trangThai)).toList();
       default:
-        return orders;
+        return ownedOrders;
     }
   }
 
@@ -187,11 +192,11 @@ class _OrderListTabState extends State<OrderListTab> {
   }
 
   Widget _buildOrderCard(DonHangModel order) {
-    // Đơn đang trên đường giao -> cho phép bấm vào để mở bản đồ theo dõi
-    final bool isTrackable = order.trangThai == 'DangGiao';
+    // Các đơn còn đang xử lý (chưa hoàn tất/thất bại/huỷ) -> cho phép bấm vào để mở bản đồ
+    final bool isActionable = order.trangThai == 'DaXacNhan' || order.trangThai == 'DangGiao';
 
     return GestureDetector(
-      onTap: isTrackable
+      onTap: isActionable
           ? () {
               Navigator.push(
                 context,
@@ -246,6 +251,13 @@ class _OrderListTabState extends State<OrderListTab> {
                 ),
               ],
             ),
+            if (order.soLanGiaoThatBai > 0) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Đã giao thất bại ${order.soLanGiaoThatBai} lần',
+                style: const TextStyle(fontSize: 12, color: Color(0xFFC0392B), fontWeight: FontWeight.w600),
+              ),
+            ],
             const SizedBox(height: 12),
             Divider(height: 1, color: Colors.grey.shade200),
             const SizedBox(height: 12),
@@ -286,11 +298,6 @@ class _OrderListTabState extends State<OrderListTab> {
     late final Color textColor;
 
     switch (trangThai) {
-      case 'ChoXacNhan':
-        label = 'Chờ xác nhận';
-        bgColor = const Color(0xFFF3E8D9);
-        textColor = const Color(0xFF9B7A2F);
-        break;
       case 'DaXacNhan':
         label = 'Đã xác nhận';
         bgColor = const Color(0xFFFBDCE0);
@@ -313,6 +320,11 @@ class _OrderListTabState extends State<OrderListTab> {
         break;
       case 'DaHuy':
         label = 'Đã huỷ';
+        bgColor = const Color(0xFFE5E5E5);
+        textColor = const Color(0xFF616161);
+        break;
+      case 'HuyTraHang':
+        label = 'Huỷ trả hàng';
         bgColor = const Color(0xFFE5E5E5);
         textColor = const Color(0xFF616161);
         break;

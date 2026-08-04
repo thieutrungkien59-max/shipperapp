@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../../services/api_service.dart';
+import '../../../core/repositories/order_repository.dart';
 
 class CameraProofScreen extends StatefulWidget {
   final bool isDeliveryPhase;
@@ -20,9 +22,18 @@ class _CameraProofScreenState extends State<CameraProofScreen> {
   int _selectedAuthTab = 1; 
   late TextEditingController _nameController;
 
+  bool _isUploading = false;
+  late final OrderRepository _orderRepository;
+
+  // Ảnh minh chứng hiện đang MÔ PHỎNG (chưa nối camera thật/upload file thật lên server)
+  // -> tạm dùng URL ảnh demo cố định để có giá trị hợp lệ gửi lên API.
+  static const String _mockPhotoUrl =
+      'https://images.unsplash.com/photo-1616423640778-28d1b53229bd?q=80&w=600';
+
   @override
   void initState() {
     super.initState();
+    _orderRepository = OrderRepository(ApiServices());
     _nameController = TextEditingController(
       text: widget.isDeliveryPhase ? 'Nguyễn Văn A' : 'Trần Văn B',
     );
@@ -381,6 +392,37 @@ class _CameraProofScreenState extends State<CameraProofScreen> {
     );
   }
 
+  Future<void> _handleCompleteProof() async {
+    setState(() => _isUploading = true);
+
+    // Build chuỗi chuKyOtp tuỳ theo tab đang chọn (0 = Chữ ký, 1 = OTP)
+    final String chuKyOtp = _selectedAuthTab == 1
+        ? '159026' // Mã OTP mô phỏng hiện đang hiển thị trong khung OTP giả lập
+        : 'ChuKy:${_nameController.text.trim()}';
+
+    try {
+      await _orderRepository.uploadDeliveryProof(
+        maDonHang: widget.maDh,
+        hinhAnhUrl: _mockPhotoUrl,
+        chuKyOtp: chuKyOtp,
+      );
+
+      if (!mounted) return;
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Lỗi lưu minh chứng: ${e.toString().replaceAll('Exception: ', '')}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isUploading = false);
+    }
+  }
+
   Widget _buildBottomAction() {
     // ĐIỀU KIỆN ĐỂ NÚT HOÀN THÀNH SÁNG LÊN
     bool isFormValid = _isPhotoTaken && _isAuthComplete;
@@ -397,10 +439,8 @@ class _CameraProofScreenState extends State<CameraProofScreen> {
               width: double.infinity,
               height: 54,
               child: ElevatedButton(
-                // Nếu chưa đủ điều kiện -> onPressed = null (nút tự động bị mờ/disable)
-                onPressed: isFormValid ? () {
-                  Navigator.pop(context, true);
-                } : null,
+                // Nếu chưa đủ điều kiện hoặc đang gửi -> onPressed = null (nút tự động bị mờ/disable)
+                onPressed: (isFormValid && !_isUploading) ? _handleCompleteProof : null,
                 style: ElevatedButton.styleFrom(
                   // Thay đổi màu nền tùy theo trạng thái hợp lệ
                   backgroundColor: isFormValid ? _primaryRed : Colors.grey.shade300,
@@ -408,14 +448,20 @@ class _CameraProofScreenState extends State<CameraProofScreen> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   elevation: 0,
                 ),
-                child: Text(
-                  'Hoàn thành', 
-                  style: TextStyle(
-                    color: isFormValid ? Colors.white : Colors.grey.shade500, // Đổi màu chữ tương ứng
-                    fontWeight: FontWeight.bold, 
-                    fontSize: 16
-                  )
-                ),
+                child: _isUploading
+                    ? const SizedBox(
+                        height: 22,
+                        width: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : Text(
+                        'Hoàn thành', 
+                        style: TextStyle(
+                          color: isFormValid ? Colors.white : Colors.grey.shade500, // Đổi màu chữ tương ứng
+                          fontWeight: FontWeight.bold, 
+                          fontSize: 16
+                        )
+                      ),
               ),
             ),
             const SizedBox(height: 8),

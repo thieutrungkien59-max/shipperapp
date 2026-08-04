@@ -1,16 +1,66 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:geolocator/geolocator.dart';
 import '../../order_proof/screens/camera_proof_screen.dart';
 import '../../../models/don_hang_model.dart';
+import '../../../services/location_service.dart';
 
-class OrderDetailScreen extends StatelessWidget {
+class OrderDetailScreen extends StatefulWidget {
   final bool isDeliveryPhase;
   final DonHangModel order;
 
   const OrderDetailScreen({Key? key, this.isDeliveryPhase = false, required this.order}) : super(key: key);
 
+  @override
+  State<OrderDetailScreen> createState() => _OrderDetailScreenState();
+}
+
+class _OrderDetailScreenState extends State<OrderDetailScreen> {
   final Color _primaryRed = const Color(0xFFE51D35);
   final Color _successGreen = const Color(0xFF28A745);
   final Color _bgColor = const Color(0xFFFAF8F8);
+
+  final MapController _mapController = MapController();
+  late final LocationService _locationService;
+  StreamSubscription<Position>? _positionSubscription;
+  LatLng? _currentLatLng;
+  String? _gpsError;
+
+  @override
+  void initState() {
+    super.initState();
+    _locationService = LocationService();
+    _startLocationTracking();
+  }
+
+  Future<void> _startLocationTracking() async {
+    try {
+      final initialPosition = await _locationService.getCurrentPosition();
+      if (!mounted) return;
+      setState(() {
+        _currentLatLng = LatLng(initialPosition.latitude, initialPosition.longitude);
+      });
+      _mapController.move(_currentLatLng!, 15);
+
+      _positionSubscription = _locationService.watchPosition().listen((position) {
+        if (!mounted) return;
+        setState(() => _currentLatLng = LatLng(position.latitude, position.longitude));
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() => _gpsError = e.toString().replaceAll('Exception: ', ''));
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _positionSubscription?.cancel();
+    _mapController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -22,6 +72,7 @@ class OrderDetailScreen extends StatelessWidget {
           _buildStatusStepper(),
           Expanded(
             child: SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
               child: Column(
                 children: [
                   _buildMapSnapshot(),
@@ -65,7 +116,7 @@ class OrderDetailScreen extends StatelessWidget {
           ),
           const SizedBox(height: 2),
           Text(
-            order.maDh,
+            widget.order.maDh,
             style: TextStyle(color: Colors.grey.shade600, fontSize: 13, fontWeight: FontWeight.normal),
           ),
         ],
@@ -82,9 +133,9 @@ class OrderDetailScreen extends StatelessWidget {
         children: [
           _buildStepItem('Xác nhận đơn', isDone: true, isCurrent: false),
           _buildStepLine(isDone: true),
-          _buildStepItem('Đang lấy\nhàng', isDone: isDeliveryPhase, isCurrent: !isDeliveryPhase),
-          _buildStepLine(isDone: isDeliveryPhase), 
-          _buildStepItem('Đang giao', isDone: false, isCurrent: isDeliveryPhase),
+          _buildStepItem('Đang lấy\nhàng', isDone: widget.isDeliveryPhase, isCurrent: !widget.isDeliveryPhase),
+          _buildStepLine(isDone: widget.isDeliveryPhase), 
+          _buildStepItem('Đang giao', isDone: false, isCurrent: widget.isDeliveryPhase),
         ],
       ),
     );
@@ -150,13 +201,48 @@ class OrderDetailScreen extends StatelessWidget {
       width: double.infinity,
       height: 160,
       color: const Color(0xFFEAEAEA),
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Icon(Icons.map_outlined, size: 60, color: Colors.grey.shade400),
-          const Text('Bản đồ lộ trình', style: TextStyle(color: Colors.grey)),
-        ],
-      ),
+      child: _currentLatLng == null
+          ? Center(
+              child: _gpsError != null
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                      child: Text(_gpsError!, textAlign: TextAlign.center, style: TextStyle(color: Colors.grey.shade700)),
+                    )
+                  : const CircularProgressIndicator(),
+            )
+          : FlutterMap(
+              mapController: _mapController,
+              options: MapOptions(
+                initialCenter: _currentLatLng!,
+                initialZoom: 15,
+                // Vô hiệu hóa thao tác kéo/zoom để khung cuộn chính của trang hoạt động mượt mà
+                interactionOptions: const InteractionOptions(flags: InteractiveFlag.none),
+              ),
+              children: [
+                TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'com.logiroute.shipperapp',
+                ),
+                MarkerLayer(
+                  markers: [
+                    Marker(
+                      point: _currentLatLng!,
+                      width: 44,
+                      height: 44,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: _primaryRed,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 3),
+                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 6)],
+                        ),
+                        child: const Icon(Icons.two_wheeler, color: Colors.white, size: 22),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
     );
   }
 
@@ -169,7 +255,7 @@ class OrderDetailScreen extends StatelessWidget {
         children: [
           Text('ĐỊA CHỈ LẤY HÀNG', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey.shade600)),
           const SizedBox(height: 8),
-          Text(order.diaChiLay, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          Text(widget.order.diaChiLay, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           const SizedBox(height: 16),
           Row(
             children: [
@@ -206,13 +292,13 @@ class OrderDetailScreen extends StatelessWidget {
         children: [
           Text('THÔNG TIN GÓI HÀNG', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey.shade600)),
           const SizedBox(height: 16),
-          _buildInfoRow('Khối lượng (kg):', '${order.khoiLuong}'),
+          _buildInfoRow('Khối lượng (kg):', '${widget.order.khoiLuong}'),
           const SizedBox(height: 16),
-          _buildInfoRow('Kích thước (D x R x C):', order.kichThuoc ?? 'Chưa cập nhật'),
+          _buildInfoRow('Kích thước (D x R x C):', widget.order.kichThuoc ?? 'Chưa cập nhật'),
           const SizedBox(height: 16),
-          _buildInfoRow('Số tiền thu hộ COD (VNĐ):', order.tienCod.toStringAsFixed(0), valueColor: Colors.orange.shade700),
+          _buildInfoRow('Số tiền thu hộ COD (VNĐ):', widget.order.tienCod.toStringAsFixed(0), valueColor: Colors.orange.shade700),
           const SizedBox(height: 16),
-          _buildInfoRow('Phí giao hàng (VNĐ):', order.phiGiaoHang.toStringAsFixed(0)),
+          _buildInfoRow('Phí giao hàng (VNĐ):', widget.order.phiGiaoHang.toStringAsFixed(0)),
         ],
       ),
     );
@@ -247,7 +333,7 @@ class OrderDetailScreen extends StatelessWidget {
                 Text('GIAO ĐẾN', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey.shade600)),
                 const SizedBox(height: 4),
                 Text(
-                  order.diaChiGiao,
+                  widget.order.diaChiGiao,
                   style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                   maxLines: 1, overflow: TextOverflow.ellipsis,
                 ),
@@ -260,7 +346,6 @@ class OrderDetailScreen extends StatelessWidget {
     );
   }
 
-  // ĐÃ SỬA LỖI Ở ĐÂY: Xử lý đóng màn hình khi Camera báo thành công
   Widget _buildBottomButton(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -271,13 +356,11 @@ class OrderDetailScreen extends StatelessWidget {
           height: 54,
           child: ElevatedButton.icon(
             onPressed: () async {
-              // 1. Chuyển sang Camera và đợi kết quả
               final success = await Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => CameraProofScreen(isDeliveryPhase: isDeliveryPhase, maDh: order.maDh)),
+                MaterialPageRoute(builder: (context) => CameraProofScreen(isDeliveryPhase: widget.isDeliveryPhase, maDh: widget.order.maDh)),
               );
 
-              // 2. Nếu thành công, tự đóng màn hình Chi tiết này và truyền tín hiệu 'true' về cho Bản đồ
               if (success == true) {
                 if (context.mounted) {
                   Navigator.pop(context, true);
@@ -286,7 +369,7 @@ class OrderDetailScreen extends StatelessWidget {
             },
             icon: const Icon(Icons.inventory_2_outlined, color: Colors.white, size: 20),
             label: Text(
-              isDeliveryPhase ? 'Đã giao hàng thành công' : 'Đã lấy hàng — Bắt đầu giao',
+              widget.isDeliveryPhase ? 'Đã giao hàng thành công' : 'Đã lấy hàng — Bắt đầu giao',
               style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15, letterSpacing: 0.5),
             ),
             style: ElevatedButton.styleFrom(

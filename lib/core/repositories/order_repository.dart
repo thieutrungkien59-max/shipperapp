@@ -82,4 +82,44 @@ class OrderRepository {
       throw Exception('Lỗi khi cập nhật trạng thái đơn: $e');
     }
   }
+
+  // UPLOAD MINH CHỨNG GIAO/LẤY HÀNG (ảnh + OTP hoặc chữ ký)
+  Future<bool> uploadDeliveryProof({
+    required String maDonHang,
+    required String hinhAnhUrl,
+    required String chuKyOtp,
+  }) async {
+    try {
+      final body = {
+        "maDonHang": maDonHang,
+        "hinhAnhUrl": hinhAnhUrl,
+        "chuKyOtp": chuKyOtp,
+      };
+
+      await _apiService.post('/api/DonHang/upload-minh-chung', body);
+      return true;
+    } catch (e) {
+      throw Exception(e.toString().replaceAll('Exception: ', ''));
+    }
+  }
+
+  // BÁO GIAO HÀNG THẤT BẠI
+  Future<bool> reportDeliveryFailure({
+    required String maDonHang,
+    required String maShipper,
+    required String lyDo,
+  }) async {
+    try {
+      final body = {
+        "maDonHang": maDonHang,
+        "maShipper": maShipper,
+        "lyDo": lyDo,
+      };
+
+      await _apiService.post('/api/DonHang/bao-giao-that-bai', body);
+      return true;
+    } catch (e) {
+      throw Exception(e.toString().replaceAll('Exception: ', ''));
+    }
+  }
 }

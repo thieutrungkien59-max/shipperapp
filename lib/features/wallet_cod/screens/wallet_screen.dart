@@ -18,6 +18,10 @@ class _FinanceTabState extends State<FinanceTab> {
   int _selectedMethod = 1;
 
   final _amountController = TextEditingController();
+  double _currentBalance = 0; // số dư hiện tại, dùng để validate ô nhập
+  String? _amountError;
+  String? _maShipper; // lưu lại để dùng khi tạo phiếu nộp
+  bool _isSubmitting = false;
 
   // ---> Gọi API lấy thông tin Ví COD <---
   late ApiServices _apiService;
@@ -51,6 +55,8 @@ class _FinanceTabState extends State<FinanceTab> {
       return;
     }
 
+    _maShipper = maSp;
+
     setState(() {
       _futureViCod = _viCodRepository.getViCodByShipper(maSp);
     });
@@ -59,7 +65,10 @@ class _FinanceTabState extends State<FinanceTab> {
     try {
       final vi = await _futureViCod!;
       if (mounted) {
-        _amountController.text = _formatCurrency(vi.soDuHienTai);
+        setState(() {
+          _currentBalance = vi.soDuHienTai;
+          _amountController.text = _formatCurrency(vi.soDuHienTai);
+        });
       }
     } catch (_) {
       // Lỗi đã được FutureBuilder xử lý hiển thị, không cần làm gì thêm ở đây
@@ -72,9 +81,71 @@ class _FinanceTabState extends State<FinanceTab> {
     });
   }
 
-  void _handleConfirm() {
-    // TODO: gọi API xác nhận đã nộp COD khi backend có endpoint tương ứng
-    debugPrint('Phương thức: $_selectedMethod, Số tiền: ${_amountController.text}');
+  Future<void> _handleConfirm() async {
+    // Không có gì để nộp
+    if (_currentBalance <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Bạn không có COD nào cần nộp lúc này.')),
+      );
+      return;
+    }
+
+    if (_maShipper == null || _maShipper!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Không tìm thấy mã Shipper. Vui lòng đăng nhập lại.')),
+      );
+      return;
+    }
+
+    final amount = _parseAmount(_amountController.text);
+
+    if (amount <= 0) {
+      setState(() => _amountError = 'Số tiền phải lớn hơn 0');
+      return;
+    }
+    if (amount > _currentBalance) {
+      setState(() => _amountError = 'Số tiền không được vượt quá số dư đang giữ');
+      return;
+    }
+
+    setState(() {
+      _amountError = null;
+      _isSubmitting = true;
+    });
+
+    try {
+      await _viCodRepository.createPhieuNop(_maShipper!, amount);
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Đã tạo phiếu nộp COD, chờ Quản lý xác nhận.'),
+          backgroundColor: Color(0xFF2E9E5B),
+        ),
+      );
+
+      // Tải lại số dư mới nhất sau khi tạo phiếu thành công
+      await _loadViCod();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceAll('Exception: ', '')),
+          backgroundColor: _primaryRed,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
+  }
+
+  // Chuyển "1,234,567" -> 1234567.0 (bỏ dấu phẩy phân cách)
+  double _parseAmount(String text) {
+    final cleaned = text.replaceAll(',', '').replaceAll('.', '').trim();
+    return double.tryParse(cleaned) ?? 0;
   }
 
   // Định dạng số kiểu 1.234.567 (không dùng package intl vì project chưa có sẵn)
@@ -480,45 +551,72 @@ class _FinanceTabState extends State<FinanceTab> {
   }
 
   Widget _buildAmountField() {
-    return Container(
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey.shade300),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: TextField(
-        controller: _amountController,
-        keyboardType: TextInputType.number,
-        style: const TextStyle(
-          fontSize: 20,
-          fontWeight: FontWeight.bold,
-          color: Colors.black87,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: _amountError != null ? _primaryRed : Colors.grey.shade300,
+            ),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: TextField(
+            controller: _amountController,
+            keyboardType: TextInputType.number,
+            enabled: _currentBalance > 0,
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Colors.black87,
+            ),
+            decoration: const InputDecoration(
+              border: InputBorder.none,
+              contentPadding: EdgeInsets.symmetric(vertical: 14, horizontal: 14),
+            ),
+            onChanged: (_) {
+              if (_amountError != null) {
+                setState(() => _amountError = null);
+              }
+            },
+          ),
         ),
-        decoration: const InputDecoration(
-          border: InputBorder.none,
-          contentPadding: EdgeInsets.symmetric(vertical: 14, horizontal: 14),
-        ),
-      ),
+        if (_amountError != null) ...[
+          const SizedBox(height: 6),
+          Text(
+            _amountError!,
+            style: const TextStyle(fontSize: 12, color: _primaryRed),
+          ),
+        ],
+      ],
     );
   }
 
   Widget _buildConfirmButton() {
+    final canSubmit = _currentBalance > 0 && !_isSubmitting;
     return SizedBox(
       width: double.infinity,
       height: 52,
       child: ElevatedButton(
-        onPressed: _handleConfirm,
+        onPressed: canSubmit ? _handleConfirm : null,
         style: ElevatedButton.styleFrom(
-          backgroundColor: _primaryRed,
+          backgroundColor: (_currentBalance > 0) ? _primaryRed : Colors.grey.shade300,
           foregroundColor: Colors.white,
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
           ),
         ),
-        child: const Text(
-          'XÁC NHẬN ĐÃ NỘP',
-          style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-        ),
+        child: _isSubmitting
+            ? const SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
+              )
+            : Text(
+                _currentBalance > 0 ? 'XÁC NHẬN ĐÃ NỘP' : 'KHÔNG CÓ COD CẦN NỘP',
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+              ),
       ),
     );
   }

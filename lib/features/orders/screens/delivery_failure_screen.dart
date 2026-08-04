@@ -2,20 +2,23 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/repositories/order_repository.dart';
 import '../../../services/api_service.dart';
+import '../../../models/don_hang_model.dart';
 
 /// Màn hình Shipper báo cáo giao hàng thất bại.
-/// Trả về `true` qua Navigator.pop khi đã gửi báo cáo thành công, để màn cha
-/// (MapDeliveryScreen) biết đường thoát về Home.
+/// Trả về DonHangModel (đã fetch lại mới nhất từ server) qua Navigator.pop khi gửi báo cáo
+/// thành công, để màn cha (MapDeliveryScreen) biết đơn còn "DangGiao" (tiếp tục giao, chỉ tăng
+/// soLanGiaoThatBai) hay đã bị server tự chuyển "GiaoThatBai" (đủ số lần thất bại tối đa, cần
+/// thoát về Home). Trả về `null` nếu người dùng huỷ thao tác hoặc có lỗi.
 class DeliveryFailureScreen extends StatefulWidget {
   final String maDonHang;
-  final int soLanThatBaiHienTai; // Số lần đã thất bại trước đó (chưa tính lần này)
+  final int soLanThatBaiHienTai; // Số lần đã thất bại trước đó (lấy từ order.soLanGiaoThatBai)
   final int soLanToiDa;
 
   const DeliveryFailureScreen({
     Key? key,
-    this.maDonHang = 'LR-VN-10293', // TODO: nhận mã đơn thật khi MapDeliveryScreen được nối với DonHangModel
-    this.soLanThatBaiHienTai = 1,
-    this.soLanToiDa = 3,
+    required this.maDonHang,
+    required this.soLanThatBaiHienTai,
+    this.soLanToiDa = 3, // Chỉ mang tính hiển thị tham khảo; quyết định huỷ đơn thật do server trả về
   }) : super(key: key);
 
   @override
@@ -26,10 +29,6 @@ class _DeliveryFailureScreenState extends State<DeliveryFailureScreen> {
   final Color _primaryRed = const Color(0xFFE51D35);
   final Color _bgColor = const Color(0xFFFAF8F8);
   final Color _warningOrange = const Color(0xFFEF8C2C);
-
-  // TODO: Xác nhận lại với backend giá trị trangThaiMoi chính xác cho "giao thất bại"
-  // (ví dụ: "GiaoThatBai", "ThatBai"...). Đang tạm để "GiaoThatBai".
-  static const String _trangThaiGiaoThatBai = 'GiaoThatBai';
 
   late final OrderRepository _orderRepository;
 
@@ -81,19 +80,27 @@ class _DeliveryFailureScreenState extends State<DeliveryFailureScreen> {
         throw Exception('Không tìm thấy mã Shipper, vui lòng đăng nhập lại.');
       }
 
-      final String ghiChu = _isOtherReasonSelected
-          ? _noteController.text.trim()
+      // LƯU Ý: chỉ "Khac" đã được backend xác nhận là giá trị lyDo chắc chắn hợp lệ.
+      // Với lý do soạn sẵn (không phải "Khác"), mình vẫn gửi đúng mô tả tiếng Việt của lý do đó
+      // (nhiều khả năng field này chỉ lưu mô tả tự do, không phải enum cứng) — nếu backend từ chối
+      // (lỗi 400), báo lại để mình đổi sang gửi cố định "Khac" kèm mô tả thay vì gửi thẳng lý do.
+      final String lyDo = _isOtherReasonSelected
+          ? 'Khac: ${_noteController.text.trim()}'
           : _lyDoList[_selectedIndex];
 
-      await _orderRepository.updateOrderStatus(
-        widget.maDonHang,
-        maSp,
-        _trangThaiGiaoThatBai,
-        ghiChu: ghiChu,
+      await _orderRepository.reportDeliveryFailure(
+        maDonHang: widget.maDonHang,
+        maShipper: maSp,
+        lyDo: lyDo,
       );
 
+      // Lấy lại dữ liệu đơn hàng mới nhất từ server (nguồn dữ liệu chuẩn duy nhất) để biết
+      // chính xác: soLanGiaoThatBai đã tăng chưa, và trangThai còn "DangGiao" hay đã bị server
+      // tự chuyển thành "GiaoThatBai" (khi đạt số lần tối đa).
+      final updatedOrder = await _orderRepository.getOrderDetail(widget.maDonHang);
+
       if (!mounted) return;
-      Navigator.pop(context, true);
+      Navigator.pop(context, updatedOrder);
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -173,7 +180,7 @@ class _DeliveryFailureScreenState extends State<DeliveryFailureScreen> {
 
   Widget _buildStatusCard() {
     // Lần thất bại nếu xác nhận lần này = soLanThatBaiHienTai + 1
-    final int lanThatBaiSauKhiXacNhan = widget.soLanThatBaiHienTai;
+    final int lanThatBaiSauKhiXacNhan = widget.soLanThatBaiHienTai + 1;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(

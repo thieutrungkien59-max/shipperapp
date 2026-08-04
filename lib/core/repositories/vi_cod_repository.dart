@@ -28,4 +28,18 @@ class ViCodRepository {
       throw Exception(e.toString().replaceAll('Exception: ', ''));
     }
   }
+
+  // TẠO PHIẾU NỘP COD (Shipper xác nhận đã nộp tiền cho Quản lý duyệt)
+  // -> Dùng cho nút "XÁC NHẬN ĐÃ NỘP" trong tab Finance
+  Future<void> createPhieuNop(String maShipper, double tongTienNop) async {
+    try {
+      final body = {
+        "maShipper": maShipper,
+        "tongTienNop": tongTienNop,
+      };
+      await _apiService.post('/api/DoiSoat/tao-phieu', body);
+    } catch (e) {
+      throw Exception(e.toString().replaceAll('Exception: ', ''));
+    }
+  }
 }
