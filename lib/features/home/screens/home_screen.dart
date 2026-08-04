@@ -348,8 +348,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           );
         }
 
-        final firstOrder = snapshot.data!.first;
-        return _buildOrderCard(firstOrder);
+        // Hiển thị tối đa 5 đơn để Shipper lướt xem và chọn (trang Home vốn đã nằm trong
+        // SingleChildScrollView nên không cần bọc thêm ListView cuộn riêng ở đây).
+        final orders = snapshot.data!.take(5).toList();
+        return Column(
+          children: [
+            for (int i = 0; i < orders.length; i++) ...[
+              _buildOrderCard(orders[i]),
+              if (i != orders.length - 1) const SizedBox(height: 12),
+            ],
+          ],
+        );
       },
     );
   }
@@ -474,6 +483,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         return 'Giao thất bại';
       case 'DaHuy':
         return 'Đã huỷ';
+      case 'HuyTraHang':
+        return 'Huỷ trả hàng';
       default:
         return trangThai;
     }
