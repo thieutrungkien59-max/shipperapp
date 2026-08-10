@@ -6,6 +6,7 @@ import 'package:geolocator/geolocator.dart';
 import '../../order_proof/screens/camera_proof_screen.dart';
 import '../../../models/don_hang_model.dart';
 import '../../../services/location_service.dart';
+import '../../../core/utils/call_utils.dart';
 
 class OrderDetailScreen extends StatefulWidget {
   final bool isDeliveryPhase;
@@ -274,7 +275,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               const SizedBox(width: 12),
               Container(
                 decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
-                child: IconButton(icon: const Icon(Icons.phone_outlined, color: Colors.black87), onPressed: () {}),
+                child: IconButton(
+                  icon: const Icon(Icons.phone_outlined, color: Colors.black87),
+                  onPressed: () => CallUtils.call(context, widget.order.sdtNguoiGui),
+                ),
               ),
             ],
           ),
@@ -358,7 +362,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             onPressed: () async {
               final success = await Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => CameraProofScreen(isDeliveryPhase: widget.isDeliveryPhase, maDh: widget.order.maDh)),
+                MaterialPageRoute(builder: (context) => CameraProofScreen(
+                  isDeliveryPhase: widget.isDeliveryPhase,
+                  maDh: widget.order.maDh,
+                  phoneNumber: widget.isDeliveryPhase ? widget.order.sdtNguoiNhan : widget.order.sdtNguoiGui,
+                )),
               );
 
               if (success == true) {

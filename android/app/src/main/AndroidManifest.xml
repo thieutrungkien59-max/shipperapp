@@ -2,6 +2,9 @@
     <!-- Quyền vị trí bắt buộc để geolocator lấy GPS thật của Shipper -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Quyền camera để chụp ảnh minh chứng giao/lấy hàng -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <application
         android:label="shipperapp"
         android:name="${applicationName}"

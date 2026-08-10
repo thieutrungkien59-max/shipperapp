@@ -20,6 +20,7 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
   int _timeLeft = 30;
   Timer? _timer;
   bool _isAccepting = false;
+  bool _isReleasing = false;
 
   // Trạng thái tải dữ liệu chi tiết đơn hàng + thông tin xe của Shipper
   bool _isLoading = true;
@@ -98,9 +99,11 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
           _timeLeft--;
         });
       } else {
-        // Hết giờ: Hủy timer và tự động đóng màn hình, thoát về Home
         _timer?.cancel();
-        Navigator.pop(context);
+        _handleRejectOrder(
+          reason: 'Hết 30 giây không phản hồi',
+          showMessage: false,
+        );
       }
     });
   }
@@ -128,11 +131,11 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
         throw Exception('Không tìm thấy mã Shipper, vui lòng đăng nhập lại.');
       }
 
-      // Gọi API thật để xác nhận nhận đơn
-      await _orderRepository.updateOrderStatus(
-        _order!.maDh,
-        maSp,
-        _trangThaiKhiNhanDon,
+      // Chỉ nhận được đơn đang được Admin chỉ định cho chính Shipper này.
+      await _orderRepository.respondToAssignedOrder(
+        maDonHang: _order!.maDh,
+        maShipper: maSp,
+        chapNhan: true,
       );
 
       if (!mounted) return;
@@ -158,6 +161,63 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
         // Đơn vẫn còn hiệu lực trong thời gian còn lại nếu nhận đơn thất bại
         _startTimer();
       }
+    }
+  }
+
+  Future<void> _handleRejectOrder({
+    String reason = 'Shipper từ chối đơn',
+    bool showMessage = true,
+  }) async {
+    if (_order == null || _isReleasing) return;
+
+    _timer?.cancel();
+
+    setState(() {
+      _isReleasing = true;
+    });
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final maSp = prefs.getString('maSp');
+
+      if (maSp == null || maSp.isEmpty) {
+        throw Exception('Không tìm thấy mã Shipper.');
+      }
+
+      await _orderRepository.respondToAssignedOrder(
+        maDonHang: _order!.maDh,
+        maShipper: maSp,
+        chapNhan: false,
+        lyDo: reason,
+      );
+
+      if (!mounted) return;
+
+      if (showMessage) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Đã từ chối đơn. Đơn được trả về điều phối.'),
+          ),
+        );
+      }
+
+      Navigator.pop(context);
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _isReleasing = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Không thể trả đơn về điều phối: '
+            '${e.toString().replaceAll('Exception: ', '')}',
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
@@ -343,7 +403,7 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
             width: double.infinity,
             height: 54,
             child: ElevatedButton(
-              onPressed: (_isAccepting || _isOverWeight) ? null : _handleAcceptOrder,
+              onPressed: (_isAccepting || _isReleasing || _isOverWeight) ? null : _handleAcceptOrder,
               style: ElevatedButton.styleFrom(
                 backgroundColor: _isOverWeight ? Colors.grey.shade400 : _primaryRed,
                 shape: RoundedRectangleBorder(
@@ -371,7 +431,25 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
                     ),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
+          TextButton(
+            onPressed: (_isAccepting || _isReleasing)
+                ? null
+                : () => _handleRejectOrder(),
+            child: _isReleasing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text(
+                    'TỪ CHỐI ĐƠN',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black54,
+                    ),
+                  ),
+          ),
           const SizedBox(height: 8),
         ],
       ),

@@ -6,6 +6,9 @@ import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import '../../../models/don_hang_model.dart';
 import '../../../services/location_service.dart';
+import '../../../services/api_service.dart';
+import '../../../core/repositories/order_repository.dart';
+import '../../../core/utils/route_simulator.dart';
 
 // Bật quyền cho chuột máy tính có thể vuốt (drag) như ngón tay
 class _MouseDragScrollBehavior extends MaterialScrollBehavior {
@@ -33,9 +36,14 @@ class _FullMapScreenState extends State<FullMapScreen> {
 
   final MapController _mapController = MapController();
   late final LocationService _locationService;
+  late final OrderRepository _orderRepository;
   StreamSubscription<Position>? _positionSubscription;
   LatLng? _currentLatLng;
   String? _gpsError;
+  FixedRoutePoints? _routePoints;
+  SimulatedRoute? _simulatedRoute;
+  bool _isRouteSimulated = true;
+  bool _isLoadingRoute = false;
 
   // --- Khung thông tin vuốt ---
   final DraggableScrollableController _sheetController = DraggableScrollableController();
@@ -46,6 +54,7 @@ class _FullMapScreenState extends State<FullMapScreen> {
   void initState() {
     super.initState();
     _locationService = LocationService();
+    _orderRepository = OrderRepository(ApiServices());
     
     // Đồng bộ vị trí nút định vị theo thẻ vuốt
     _sheetController.addListener(() {
@@ -65,6 +74,7 @@ class _FullMapScreenState extends State<FullMapScreen> {
         _currentLatLng = LatLng(initialPosition.latitude, initialPosition.longitude);
       });
       _mapController.move(_currentLatLng!, 15);
+      await _buildRoute();
 
       _positionSubscription = _locationService.watchPosition().listen((position) {
         if (!mounted) return;
@@ -75,6 +85,54 @@ class _FullMapScreenState extends State<FullMapScreen> {
         setState(() => _gpsError = e.toString().replaceAll('Exception: ', ''));
       }
     }
+  }
+
+  // Ưu tiên gọi API THẬT (/api/DonHang/tinh-phi-van-chuyen) khi đơn có toạ độ,
+  // dự phòng mô phỏng nếu chưa có toạ độ hoặc gọi API lỗi. Xem giải thích chi tiết
+  // trong map_delivery_screen.dart (_maybeBuildSimulatedRoute) — logic tương tự.
+  Future<void> _buildRoute() async {
+    if (_currentLatLng == null) return;
+
+    final order = widget.order;
+    final LatLng? realTarget = widget.isDeliveryPhase
+        ? (order.viDoGiao != null && order.kinhDoGiao != null ? LatLng(order.viDoGiao!, order.kinhDoGiao!) : null)
+        : (order.viDoLay != null && order.kinhDoLay != null ? LatLng(order.viDoLay!, order.kinhDoLay!) : null);
+
+    if (realTarget != null) {
+      setState(() => _isLoadingRoute = true);
+      try {
+        final quote = await _orderRepository.calculateShippingRoute(pickup: _currentLatLng!, delivery: realTarget);
+        if (!mounted) return;
+        setState(() {
+          _simulatedRoute = SimulatedRoute(
+            from: _currentLatLng!,
+            to: realTarget,
+            routePoints: quote.routePoints.isNotEmpty ? quote.routePoints : [_currentLatLng!, realTarget],
+            distanceKm: quote.distanceKm,
+            etaMinutesOverride: quote.durationMinutes,
+          );
+          _isRouteSimulated = false;
+          _isLoadingRoute = false;
+        });
+        return;
+      } catch (e) {
+        debugPrint('[Route] Lỗi gọi API tuyến đường thật, dùng mô phỏng thay thế: $e');
+        if (mounted) setState(() => _isLoadingRoute = false);
+      }
+    }
+
+    final seed = '${order.maDh}_${order.diaChiLay}_${order.diaChiGiao}';
+    _routePoints = RouteSimulator.resolveFixedPoints(seed);
+    final target = widget.isDeliveryPhase ? _routePoints!.dropoffPoint : _routePoints!.pickupPoint;
+    if (!mounted) return;
+    setState(() {
+      _simulatedRoute = RouteSimulator.buildPath(
+        from: _currentLatLng!,
+        to: target,
+        seedText: '$seed-${widget.isDeliveryPhase ? "giao" : "lay"}',
+      );
+      _isRouteSimulated = true;
+    });
   }
 
   @override
@@ -116,6 +174,16 @@ class _FullMapScreenState extends State<FullMapScreen> {
                   urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                   userAgentPackageName: 'com.logiroute.shipperapp',
                 ),
+                if (_simulatedRoute != null)
+                  PolylineLayer(
+                    polylines: [
+                      Polyline(
+                        points: _simulatedRoute!.routePoints,
+                        color: _primaryRed.withOpacity(0.85),
+                        strokeWidth: 4,
+                      ),
+                    ],
+                  ),
                 MarkerLayer(
                   markers: [
                     Marker(
@@ -132,6 +200,16 @@ class _FullMapScreenState extends State<FullMapScreen> {
                         child: const Icon(Icons.two_wheeler, color: Colors.white, size: 22),
                       ),
                     ),
+                    if (_simulatedRoute != null)
+                      Marker(
+                        point: _simulatedRoute!.to,
+                        width: 36,
+                        height: 36,
+                        child: _buildRoutePointMarker(
+                          icon: widget.isDeliveryPhase ? Icons.location_on : Icons.storefront,
+                          color: widget.isDeliveryPhase ? _primaryRed : Colors.orange.shade700,
+                        ),
+                      ),
                   ],
                 ),
               ],
@@ -234,7 +312,27 @@ class _FullMapScreenState extends State<FullMapScreen> {
                         'THÔNG TIN LỘ TRÌNH',
                         style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey.shade600, letterSpacing: 0.5),
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 8),
+                      if (_isLoadingRoute)
+                        Row(
+                          children: [
+                            const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                            const SizedBox(width: 8),
+                            Text('Đang tính tuyến đường...', style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+                          ],
+                        )
+                      else if (_simulatedRoute != null)
+                        Row(
+                          children: [
+                            Icon(Icons.directions_car_outlined, size: 16, color: Colors.grey.shade600),
+                            const SizedBox(width: 6),
+                            Text(
+                              '${_simulatedRoute!.distanceKm.toStringAsFixed(1)} km · ~${_simulatedRoute!.etaMinutes} phút${_isRouteSimulated ? ' (mô phỏng)' : ''}',
+                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.grey.shade800),
+                            ),
+                          ],
+                        ),
+                      const SizedBox(height: 12),
                       // Địa chỉ lấy
                       _addressRow(
                         icon: Icons.storefront_outlined,
@@ -323,6 +421,19 @@ class _FullMapScreenState extends State<FullMapScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  // Marker tròn nhỏ dùng chung cho điểm lấy hàng / điểm giao hàng (mô phỏng)
+  Widget _buildRoutePointMarker({required IconData icon, required Color color}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        shape: BoxShape.circle,
+        border: Border.all(color: color, width: 3),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 4)],
+      ),
+      child: Icon(icon, color: color, size: 18),
     );
   }
 }

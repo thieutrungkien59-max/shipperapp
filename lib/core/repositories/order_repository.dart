@@ -1,5 +1,7 @@
+import 'package:latlong2/latlong.dart';
 import '../../services/api_service.dart';
 import '../../models/don_hang_model.dart';
+import '../../models/shipping_quote_model.dart';
 
 class OrderRepository {
   final ApiServices _apiService;
@@ -35,6 +37,43 @@ class OrderRepository {
     try {
       final response = await _apiService.get('/api/DonHang/danh-sach-cho-nhan');
       return _parseOrderList(response);
+    } catch (e) {
+      throw Exception(e.toString().replaceAll('Exception: ', ''));
+    }
+  }
+
+  // LẤY ĐƠN ADMIN ĐÃ CHỈ ĐỊNH RIÊNG CHO SHIPPER NÀY
+  // Trạng thái backend: ChoShipperXacNhan.
+  Future<List<DonHangModel>> getAssignedOrdersWaitingConfirmation(
+    String maShipper,
+  ) async {
+    try {
+      final response = await _apiService.get(
+        '/api/DonHang/shipper/$maShipper/cho-xac-nhan',
+      );
+      return _parseOrderList(response);
+    } catch (e) {
+      throw Exception(e.toString().replaceAll('Exception: ', ''));
+    }
+  }
+
+  // SHIPPER NHẬN / TỪ CHỐI ĐƠN ĐÃ ĐƯỢC ADMIN CHỈ ĐỊNH.
+  Future<void> respondToAssignedOrder({
+    required String maDonHang,
+    required String maShipper,
+    required bool chapNhan,
+    String? lyDo,
+  }) async {
+    try {
+      await _apiService.post(
+        '/api/DonHang/shipper-phan-hoi-don',
+        {
+          'maDonHang': maDonHang,
+          'maShipper': maShipper,
+          'chapNhan': chapNhan,
+          'lyDo': lyDo,
+        },
+      );
     } catch (e) {
       throw Exception(e.toString().replaceAll('Exception: ', ''));
     }
@@ -118,6 +157,48 @@ class OrderRepository {
 
       await _apiService.post('/api/DonHang/bao-giao-that-bai', body);
       return true;
+    } catch (e) {
+      throw Exception(e.toString().replaceAll('Exception: ', ''));
+    }
+  }
+
+  // TÍNH TUYẾN ĐƯỜNG BỘ THẬT (qua OSRM) + PHÍ VẬN CHUYỂN GIỮA 2 TOẠ ĐỘ.
+  // Dùng để vẽ tuyến đường thật cho Shipper thay vì mô phỏng, y hệt cách app
+  // người dùng đang dùng (POST /api/DonHang/tinh-phi-van-chuyen).
+  Future<ShippingQuoteModel> calculateShippingRoute({
+    required LatLng pickup,
+    required LatLng delivery,
+  }) async {
+    try {
+      final body = {
+        "viDoLay": pickup.latitude,
+        "kinhDoLay": pickup.longitude,
+        "viDoGiao": delivery.latitude,
+        "kinhDoGiao": delivery.longitude,
+      };
+
+      final response = await _apiService.post('/api/DonHang/tinh-phi-van-chuyen', body);
+      if (response is! Map) {
+        throw Exception('Backend trả dữ liệu tính tuyến đường không hợp lệ.');
+      }
+      return ShippingQuoteModel.fromJson(Map<String, dynamic>.from(response));
+    } catch (e) {
+      throw Exception(e.toString().replaceAll('Exception: ', ''));
+    }
+  }
+
+  // GỬI OTP THẬT tới SĐT khách hàng.
+  // LƯU Ý: Backend hiện đang ở chế độ TEST — chưa thật sự bắn SMS qua nhà mạng,
+  // mà trả thẳng mã OTP về trong response (field "maOtp") để app hiển thị test.
+  // Khi Backend nối nhà mạng SMS thật, có thể maOtp sẽ không còn được trả về nữa
+  // (khi đó hàm này vẫn hoạt động, chỉ là chuỗi trả về sẽ rỗng/không dùng được).
+  Future<String> sendOtp(String soDienThoai) async {
+    try {
+      final response = await _apiService.post('/api/DonHang/gui-otp', {"soDienThoai": soDienThoai});
+      if (response is Map && response['maOtp'] != null) {
+        return response['maOtp'].toString();
+      }
+      return '';
     } catch (e) {
       throw Exception(e.toString().replaceAll('Exception: ', ''));
     }

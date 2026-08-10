@@ -14,6 +14,8 @@ import '../../../services/api_service.dart';
 import '../../../services/location_service.dart';
 import '../../../core/repositories/order_repository.dart';
 import '../../../core/repositories/shipper_repository.dart';
+import '../../../core/utils/call_utils.dart';
+import '../../../core/utils/route_simulator.dart';
 
 // Bật quyền cho chuột máy tính có thể vuốt (drag) như ngón tay
 class _MouseDragScrollBehavior extends MaterialScrollBehavior {
@@ -56,6 +58,17 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
   LatLng? _currentLatLng;
   String? _gpsError;
 
+  // Lộ trình mô phỏng, vẽ theo 2 giai đoạn:
+  // - Pha "Lấy hàng": đường từ vị trí hiện tại của shipper -> điểm lấy hàng
+  // - Pha "Giao hàng": đường từ vị trí hiện tại của shipper -> điểm giao hàng
+  // Xem chi tiết cách sinh trong RouteSimulator — đây là dữ liệu MÔ PHỎNG,
+  // không phải toạ độ thật, vì backend hiện chỉ trả địa chỉ dạng text.
+  FixedRoutePoints? _routePoints; // Toạ độ cố định 2 điểm lấy/giao hàng của đơn (chỉ dùng khi phải mô phỏng)
+  SimulatedRoute? _simulatedRoute; // Đường đi hiện đang hiển thị (ứng với pha hiện tại)
+  bool? _simulatedRouteIsDeliveryPhase; // Route hiện tại đang vẽ cho pha nào — để biết khi nào cần vẽ lại
+  bool _isRouteSimulated = true; // true = đang hiển thị dữ liệu MÔ PHỎNG, false = tuyến đường THẬT từ OSRM
+  bool _isLoadingRoute = false; // Đang gọi API tính tuyến đường thật, tránh gọi trùng
+
   final DraggableScrollableController _sheetController = DraggableScrollableController();
   
   // Cho phép hạ mức thấp nhất xuống 0.06 (6%) để giấu thẻ trắng, hiện full bản đồ
@@ -96,7 +109,11 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
         if (!mounted) return;
         final newLatLng = LatLng(position.latitude, position.longitude);
         setState(() => _currentLatLng = newLatLng);
-        _mapController.move(newLatLng, _mapController.camera.zoom);
+        // Chỉ tự động đưa camera theo vị trí khi CHƯA có tuyến đường đang hiển thị —
+        // nếu đã có route (do bấm "Chỉ đường"), giữ nguyên khung nhìn đã fit, không giật camera
+        if (_simulatedRoute == null) {
+          _mapController.move(newLatLng, _mapController.camera.zoom);
+        }
         _sendGpsUpdate(position);
       });
     } catch (e) {
@@ -158,6 +175,107 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
         _loadError = e.toString().replaceAll('Exception: ', '');
         _isLoading = false;
       });
+    }
+  }
+
+  // Vẽ lộ trình theo pha hiện tại:
+  // - Chưa lấy hàng (_isDeliveryPhase = false): vị trí hiện tại của shipper -> điểm lấy hàng
+  // - Đã lấy hàng (_isDeliveryPhase = true): vị trí hiện tại của shipper -> điểm giao hàng
+  //
+  // Ưu tiên gọi API THẬT (/api/DonHang/tinh-phi-van-chuyen, giống app người dùng) khi đơn
+  // hàng đã có toạ độ (viDoLay/kinhDoLay/viDoGiao/kinhDoGiao). Nếu đơn cũ chưa có toạ độ,
+  // hoặc gọi API lỗi (mất mạng, OSRM lỗi...), tự động rơi xuống RouteSimulator mô phỏng để
+  // Shipper vẫn luôn thấy được đường đi + quãng đường ước tính, không bị treo màn hình.
+  //
+  // Tự động: không vẽ lại liên tục theo từng nhịp GPS — chỉ vẽ lại khi CHUYỂN PHA.
+  // [force] = true khi Shipper chủ động bấm nút "Chỉ đường": bỏ qua route đã có, vẽ lại từ đầu.
+  Future<void> _maybeBuildSimulatedRoute({bool force = false}) async {
+    if (_order == null || _currentLatLng == null) {
+      debugPrint('[Route] Bỏ qua: order=${_order != null}, currentLatLng=${_currentLatLng != null}');
+      if (force && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Chưa xác định được vị trí GPS hiện tại, thử lại sau vài giây.'), backgroundColor: Colors.red),
+        );
+      }
+      return;
+    }
+
+    // Đã có route đúng cho pha hiện tại rồi, hoặc đang có 1 request chạy dở -> không làm gì thêm
+    // (trừ khi Shipper chủ động bấm "Chỉ đường" -> luôn cho vẽ lại)
+    if (!force && ((_simulatedRoute != null && _simulatedRouteIsDeliveryPhase == _isDeliveryPhase) || _isLoadingRoute)) {
+      return;
+    }
+    if (_isLoadingRoute) return; // Tránh bấm dồn dập khi đang có request chạy
+
+    // Bọc TOÀN BỘ trong try/catch: nếu có lỗi bất ngờ ở bất kỳ đâu (kể cả ngoài 2 khối
+    // try nhỏ bên dưới), vẫn không để hàm "chết lặng" không rõ lý do — luôn log +
+    // (nếu là do bấm nút chủ động) hiện SnackBar để Shipper/tester thấy ngay trên màn hình.
+    try {
+      final order = _order!;
+      final LatLng? realTarget = _isDeliveryPhase
+          ? (order.viDoGiao != null && order.kinhDoGiao != null ? LatLng(order.viDoGiao!, order.kinhDoGiao!) : null)
+          : (order.viDoLay != null && order.kinhDoLay != null ? LatLng(order.viDoLay!, order.kinhDoLay!) : null);
+
+      if (realTarget != null) {
+        setState(() => _isLoadingRoute = true);
+        try {
+          final quote = await _orderRepository.calculateShippingRoute(
+            pickup: _currentLatLng!,
+            delivery: realTarget,
+          );
+          if (!mounted) return;
+          setState(() {
+            _simulatedRoute = SimulatedRoute(
+              from: _currentLatLng!,
+              to: realTarget,
+              routePoints: quote.routePoints.isNotEmpty ? quote.routePoints : [_currentLatLng!, realTarget],
+              distanceKm: quote.distanceKm,
+              etaMinutesOverride: quote.durationMinutes,
+            );
+            _simulatedRouteIsDeliveryPhase = _isDeliveryPhase;
+            _isRouteSimulated = false;
+            _isLoadingRoute = false;
+          });
+          debugPrint('[Route] Đã lấy tuyến đường THẬT: ${quote.distanceKm}km, ${quote.durationMinutes} phút');
+          if (force) _fitMapToRoute();
+          return;
+        } catch (e) {
+          debugPrint('[Route] Lỗi gọi API tuyến đường thật, dùng mô phỏng thay thế: $e');
+          if (mounted) setState(() => _isLoadingRoute = false);
+          // Rơi xuống dùng mô phỏng bên dưới
+        }
+      }
+
+      // Chưa có toạ độ thật (đơn cũ / backend chưa cập nhật) HOẶC gọi API thật thất bại
+      final seed = '${order.maDh}_${order.diaChiLay}_${order.diaChiGiao}';
+      _routePoints ??= RouteSimulator.resolveFixedPoints(seed);
+
+      final target = _isDeliveryPhase ? _routePoints!.dropoffPoint : _routePoints!.pickupPoint;
+      final newRoute = RouteSimulator.buildPath(
+        from: _currentLatLng!,
+        to: target,
+        seedText: '$seed-${_isDeliveryPhase ? "giao" : "lay"}',
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _simulatedRoute = newRoute;
+        _simulatedRouteIsDeliveryPhase = _isDeliveryPhase;
+        _isRouteSimulated = true;
+      });
+      debugPrint('[Route] Đã vẽ route MÔ PHỎNG: ${newRoute.distanceKm.toStringAsFixed(2)}km, pha=${_isDeliveryPhase ? "giao" : "lay"}');
+      if (force) _fitMapToRoute();
+    } catch (e, st) {
+      // KHÔNG để lỗi bị "nuốt" âm thầm — log ra console VÀ hiện SnackBar để thấy ngay
+      // trên màn hình (badge sẽ đứng ở "Đang tính quãng đường..." nếu lỗi cứ lặp lại).
+      debugPrint('[Route] LỖI khi build route: $e');
+      debugPrint('$st');
+      if (mounted) {
+        setState(() => _isLoadingRoute = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Lỗi tính tuyến đường: $e'), backgroundColor: Colors.red),
+        );
+      }
     }
   }
 
@@ -249,9 +367,13 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
       setState(() {
         _isDeliveryPhase = true;
         _isArrived = false;
+        // Xoá tuyến đường của pha "lấy hàng" — chờ Shipper bấm "Chỉ đường" lại để
+        // vẽ tuyến mới sang điểm giao hàng (không tự vẽ ngay)
+        _simulatedRoute = null;
+        _simulatedRouteIsDeliveryPhase = null;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Lấy hàng thành công! Bắt đầu đi giao.')),
+        const SnackBar(content: Text('Lấy hàng thành công! Bấm "Chỉ đường" để đi giao.')),
       );
     } else {
       final success = await _updateOrderStatus('DaGiao', ghiChu: 'Shipper đã giao hàng thành công');
@@ -324,6 +446,20 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
                   ],
                 ),
     );
+  }
+
+  // Thu/phóng bản đồ để hiện trọn tuyến đường vừa vẽ (từ vị trí hiện tại đến điểm đích)
+  void _fitMapToRoute() {
+    final route = _simulatedRoute;
+    if (route == null) return;
+    try {
+      final bounds = LatLngBounds.fromPoints(route.routePoints);
+      _mapController.fitCamera(
+        CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.fromLTRB(48, 80, 48, 260)),
+      );
+    } catch (e) {
+      debugPrint('[Route] Không thể fit camera theo tuyến đường: $e');
+    }
   }
 
   void _recenterToCurrentLocation() {
@@ -492,6 +628,18 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           userAgentPackageName: 'com.logiroute.shipperapp',
         ),
+        // Đường đi mô phỏng của pha hiện tại: vị trí hiện tại -> điểm lấy hàng (pha 1)
+        // hoặc vị trí hiện tại -> điểm giao hàng (pha 2)
+        if (_simulatedRoute != null)
+          PolylineLayer(
+            polylines: [
+              Polyline(
+                points: _simulatedRoute!.routePoints,
+                strokeWidth: 4,
+                color: _primaryRed.withOpacity(0.85),
+              ),
+            ],
+          ),
         MarkerLayer(
           markers: [
             Marker(
@@ -508,13 +656,44 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
                 child: const Icon(Icons.two_wheeler, color: Colors.white, size: 22),
               ),
             ),
+            // Marker điểm đích của pha hiện tại: cam (cửa hàng) khi đang đi lấy hàng,
+            // đỏ (ghim) khi đang đi giao hàng
+            if (_simulatedRoute != null)
+              Marker(
+                point: _simulatedRoute!.to,
+                width: 36,
+                height: 36,
+                child: _buildRoutePointMarker(
+                  icon: _isDeliveryPhase ? Icons.location_on : Icons.storefront,
+                  color: _isDeliveryPhase ? _primaryRed : Colors.orange.shade700,
+                ),
+              ),
           ],
         ),
       ],
     );
   }
 
+  Widget _buildRoutePointMarker({required IconData icon, required Color color}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        shape: BoxShape.circle,
+        border: Border.all(color: color, width: 2),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 4)],
+      ),
+      child: Icon(icon, color: color, size: 18),
+    );
+  }
+
   Widget _buildDistanceBadge() {
+    final route = _simulatedRoute;
+    final String label = _isLoadingRoute
+        ? 'Đang tính tuyến đường...'
+        : route == null
+            ? 'Bấm "Chỉ đường" để xem lộ trình'
+            : '${route.distanceKm.toStringAsFixed(1)} km · ~${route.etaMinutes} phút${_isRouteSimulated ? ' (mô phỏng)' : ''}';
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
@@ -523,10 +702,12 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
-        children: const [
-          Icon(Icons.directions_car, color: Colors.black54, size: 20),
-          SizedBox(width: 8),
-          Text('Chưa có dữ liệu quãng đường', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+        children: [
+          _isLoadingRoute
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.directions_car, color: Colors.black54, size: 20),
+          const SizedBox(width: 8),
+          Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
         ],
       ),
     );
@@ -600,10 +781,17 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
                       ),
                     ),
                     const SizedBox(width: 16),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: const BoxDecoration(color: Color(0xFFF9EFEB), shape: BoxShape.circle),
-                      child: const Icon(Icons.phone, color: Colors.black87),
+                    InkWell(
+                      borderRadius: BorderRadius.circular(24),
+                      onTap: () => CallUtils.call(
+                        context,
+                        _isDeliveryPhase ? order.sdtNguoiNhan : order.sdtNguoiGui,
+                      ),
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: const BoxDecoration(color: Color(0xFFF9EFEB), shape: BoxShape.circle),
+                        child: const Icon(Icons.phone, color: Colors.black87),
+                      ),
                     ),
                   ],
                 ),
@@ -612,7 +800,14 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
                   children: [
                     Expanded(
                       child: OutlinedButton.icon(
-                        onPressed: () {},
+                        onPressed: () {
+                          // Thu gọn thẻ trắng để lộ bản đồ, rồi vẽ lại tuyến đường (chủ động,
+                          // bỏ qua route đã có nếu có) từ vị trí hiện tại -> điểm cần tới
+                          if (_sheetController.isAttached) {
+                            _sheetController.animateTo(0.06, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+                          }
+                          _maybeBuildSimulatedRoute(force: true);
+                        },
                         icon: const Icon(Icons.navigation_outlined, color: Colors.black87, size: 18),
                         label: const Text('Chỉ đường', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 13)),
                         style: OutlinedButton.styleFrom(
@@ -704,7 +899,11 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
                               final success = await Navigator.push(
                                 context,
                                 MaterialPageRoute(
-                                  builder: (context) => CameraProofScreen(isDeliveryPhase: _isDeliveryPhase, maDh: widget.maDh),
+                                  builder: (context) => CameraProofScreen(
+                                    isDeliveryPhase: _isDeliveryPhase,
+                                    maDh: widget.maDh,
+                                    phoneNumber: _isDeliveryPhase ? order.sdtNguoiNhan : order.sdtNguoiGui,
+                                  ),
                                 ),
                               );
                               if (success == true) {
