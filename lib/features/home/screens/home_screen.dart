@@ -400,7 +400,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  // Hàm hiển thị Popup khi phát hiện đơn được admin chỉ định
+  // Popup khi hệ thống/Admin phân công một đơn cho Shipper
   void _showAssignedOrderPopup(DonHangModel order) {
     _isOpeningAssignment = true; // Chặn polling popup các đơn khác khi đang mở
 
@@ -423,7 +423,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ],
           ),
           content: Text(
-            'Admin vừa phân công trực tiếp cho bạn đơn hàng ${order.maDh}.\nBạn có muốn xem chi tiết và nhận ngay không?',
+            'Hệ thống vừa phân công cho bạn đơn hàng ${order.maDh}.\nBạn có muốn xem chi tiết và phản hồi ngay không?',
             style: const TextStyle(fontSize: 14, height: 1.4),
           ),
           actions: [
