@@ -35,3 +35,33 @@ class ViCodModel {
     );
   }
 }
+
+// Model cho 1 phiếu nộp COD (kết quả trả về từ tao-phieu / danh-sach-phieu-cho-duyet)
+// Dùng để kiểm tra shipper có phiếu nào đang "ChoDuyet" chưa, tránh tạo phiếu trùng.
+class PhieuDoiSoatModel {
+  final String maDs;
+  final String maSp;
+  final double tongTienNop;
+  final String trangThai; // "ChoDuyet", "DaDuyet"...
+  final DateTime? ngayDoiSoat;
+
+  PhieuDoiSoatModel({
+    required this.maDs,
+    required this.maSp,
+    required this.tongTienNop,
+    required this.trangThai,
+    this.ngayDoiSoat,
+  });
+
+  factory PhieuDoiSoatModel.fromJson(Map<String, dynamic> json) {
+    return PhieuDoiSoatModel(
+      maDs: json['maDs']?.toString() ?? '',
+      maSp: json['maSp']?.toString() ?? '',
+      tongTienNop: ViCodModel._parseDouble(json['tongTienNop']),
+      trangThai: json['trangThai']?.toString() ?? '',
+      ngayDoiSoat: json['ngayDoiSoat'] != null
+          ? DateTime.tryParse(json['ngayDoiSoat'].toString())
+          : null,
+    );
+  }
+}

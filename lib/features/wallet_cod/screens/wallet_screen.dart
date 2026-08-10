@@ -22,6 +22,7 @@ class _FinanceTabState extends State<FinanceTab> {
   String? _amountError;
   String? _maShipper; // lưu lại để dùng khi tạo phiếu nộp
   bool _isSubmitting = false;
+  PhieuDoiSoatModel? _phieuDangChoDuyet; // phiếu nộp trước đó, nếu còn đang chờ Quản lý duyệt
 
   // ---> Gọi API lấy thông tin Ví COD <---
   late ApiServices _apiService;
@@ -36,6 +37,7 @@ class _FinanceTabState extends State<FinanceTab> {
     _viCodRepository = ViCodRepository(_apiService);
     _loadViCod();
     _loadCanhBaoCount();
+    _checkPhieuDangCho();
   }
 
   @override
@@ -81,7 +83,43 @@ class _FinanceTabState extends State<FinanceTab> {
     });
   }
 
+  // Kiểm tra shipper hiện tại đã có phiếu nào đang "ChoDuyet" chưa.
+  // Nếu có -> khóa nút "Xác nhận đã nộp" lại, tránh tạo phiếu trùng khi bấm nhiều lần.
+  Future<void> _checkPhieuDangCho() async {
+    final prefs = await SharedPreferences.getInstance();
+    final maSp = prefs.getString('maSp');
+    if (maSp == null || maSp.isEmpty) return;
+
+    try {
+      final list = await _viCodRepository.getPhieuChoDuyet();
+      final phieuCuaToi = list
+          .where((p) => p.maSp == maSp && p.trangThai == 'ChoDuyet')
+          .toList();
+
+      if (mounted) {
+        setState(() {
+          _phieuDangChoDuyet = phieuCuaToi.isNotEmpty ? phieuCuaToi.first : null;
+        });
+      }
+    } catch (_) {
+      // Không chặn cả màn hình nếu riêng API này lỗi tạm thời -
+      // chỉ đơn giản là chưa khóa được nút, không ảnh hưởng phần còn lại.
+    }
+  }
+
   Future<void> _handleConfirm() async {
+    // Đã có phiếu đang chờ Quản lý duyệt -> không cho tạo phiếu mới
+    if (_phieuDangChoDuyet != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Bạn đã có phiếu nộp ${_formatCurrency(_phieuDangChoDuyet!.tongTienNop)}đ đang chờ Quản lý duyệt. Vui lòng đợi duyệt xong.',
+          ),
+        ),
+      );
+      return;
+    }
+
     // Không có gì để nộp
     if (_currentBalance <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -125,8 +163,8 @@ class _FinanceTabState extends State<FinanceTab> {
         ),
       );
 
-      // Tải lại số dư mới nhất sau khi tạo phiếu thành công
-      await _loadViCod();
+      // Tải lại số dư mới nhất + trạng thái phiếu chờ duyệt sau khi tạo phiếu thành công
+      await Future.wait([_loadViCod(), _checkPhieuDangCho()]);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -196,7 +234,7 @@ class _FinanceTabState extends State<FinanceTab> {
   Widget build(BuildContext context) {
     return RefreshIndicator(
       onRefresh: () async {
-        await Future.wait([_loadViCod(), _loadCanhBaoCount()]);
+        await Future.wait([_loadViCod(), _loadCanhBaoCount(), _checkPhieuDangCho()]);
       },
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -216,6 +254,10 @@ class _FinanceTabState extends State<FinanceTab> {
             _buildTotalCard(),
             const SizedBox(height: 12),
             _buildCanhBaoBanner(),
+            if (_phieuDangChoDuyet != null) ...[
+              const SizedBox(height: 12),
+              _buildPendingPhieuBanner(),
+            ],
             const SizedBox(height: 24),
             const Text(
               'Phương thức nộp',
@@ -419,6 +461,38 @@ class _FinanceTabState extends State<FinanceTab> {
     );
   }
 
+  // Banner báo shipper đã có 1 phiếu nộp đang chờ Quản lý duyệt.
+  // Hiện rõ để tránh việc bấm "Xác nhận đã nộp" thêm lần nữa khi tưởng bị lag.
+  Widget _buildPendingPhieuBanner() {
+    final phieu = _phieuDangChoDuyet!;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE8EEFB),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.hourglass_top_rounded, size: 18, color: Color(0xFF3366CC)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Bạn có phiếu nộp ${_formatCurrency(phieu.tongTienNop)}đ (${phieu.maDs}) đang chờ Quản lý duyệt. '
+              'Không thể tạo phiếu mới cho đến khi phiếu này được duyệt xong.',
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF3366CC),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildCashOption() {
     final isSelected = _selectedMethod == 0;
 
@@ -593,14 +667,27 @@ class _FinanceTabState extends State<FinanceTab> {
   }
 
   Widget _buildConfirmButton() {
-    final canSubmit = _currentBalance > 0 && !_isSubmitting;
+    final hasPendingPhieu = _phieuDangChoDuyet != null;
+    final canSubmit = _currentBalance > 0 && !_isSubmitting && !hasPendingPhieu;
+
+    String label;
+    if (_isSubmitting) {
+      label = '';
+    } else if (hasPendingPhieu) {
+      label = 'ĐANG CHỜ DUYỆT PHIẾU TRƯỚC';
+    } else if (_currentBalance > 0) {
+      label = 'XÁC NHẬN ĐÃ NỘP';
+    } else {
+      label = 'KHÔNG CÓ COD CẦN NỘP';
+    }
+
     return SizedBox(
       width: double.infinity,
       height: 52,
       child: ElevatedButton(
         onPressed: canSubmit ? _handleConfirm : null,
         style: ElevatedButton.styleFrom(
-          backgroundColor: (_currentBalance > 0) ? _primaryRed : Colors.grey.shade300,
+          backgroundColor: canSubmit ? _primaryRed : Colors.grey.shade300,
           foregroundColor: Colors.white,
           elevation: 0,
           shape: RoundedRectangleBorder(
@@ -614,7 +701,7 @@ class _FinanceTabState extends State<FinanceTab> {
                 child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
               )
             : Text(
-                _currentBalance > 0 ? 'XÁC NHẬN ĐÃ NỘP' : 'KHÔNG CÓ COD CẦN NỘP',
+                label,
                 style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
               ),
       ),

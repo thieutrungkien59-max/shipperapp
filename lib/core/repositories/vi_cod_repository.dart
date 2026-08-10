@@ -42,4 +42,20 @@ class ViCodRepository {
       throw Exception(e.toString().replaceAll('Exception: ', ''));
     }
   }
+
+  // LẤY DANH SÁCH TẤT CẢ PHIẾU ĐANG CHỜ DUYỆT (toàn hệ thống, không lọc sẵn theo shipper)
+  // -> Dùng để kiểm tra: shipper hiện tại đã có phiếu nào đang "ChoDuyet" chưa,
+  // tránh tình trạng bấm "Xác nhận đã nộp" nhiều lần tạo trùng phiếu (mỗi phiếu bị
+  // trừ tiền riêng khi Quản lý duyệt lần lượt -> shipper bị trừ nhiều lần cho 1 lần nộp).
+  Future<List<PhieuDoiSoatModel>> getPhieuChoDuyet() async {
+    try {
+      final response = await _apiService.get('/api/DoiSoat/danh-sach-phieu-cho-duyet');
+      final list = response as List;
+      return list
+          .map((e) => PhieuDoiSoatModel.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      throw Exception(e.toString().replaceAll('Exception: ', ''));
+    }
+  }
 }
