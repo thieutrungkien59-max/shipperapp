@@ -1,16 +1,17 @@
 import 'dart:async';
-import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:geolocator/geolocator.dart';
 
-import '../../../models/don_hang_model.dart';
-import '../../../services/api_service.dart';
+import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../../../core/repositories/order_repository.dart';
 import '../../../core/repositories/shipper_repository.dart';
+import '../../../models/don_hang_model.dart';
+import '../../../services/api_service.dart';
 import '../../../services/location_service.dart';
+import '../../orders/screens/order_accept_screen.dart';
 import '../../orders/screens/order_list_tab.dart';
 import '../../profile/screens/profile_screen.dart';
-import '../../orders/screens/order_accept_screen.dart'; 
 import '../../wallet_cod/screens/wallet_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -23,16 +24,23 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // Quản lý tab hiện tại và tab trước đó
   int _currentIndex = 0;
-  int _previousIndex = 0; 
+  int _previousIndex = 0;
 
   final Color _primaryRed = const Color(0xFFE51D35);
   final Color _bgColor = const Color(0xFFFAF8F8);
 
   // Khai báo các biến để gọi API
   late OrderRepository _orderRepository;
-  Future<List<DonHangModel>> _futureOrders = Future.value(<DonHangModel>[]);
-  
-  // Các biến quản lý API và trạng thái Trực tuyến 
+
+  // Task 1B:
+  // Không dùng FutureBuilder cho polling 5 giây nữa.
+  // Giữ dữ liệu đơn trong state ổn định để polling chạy ngầm,
+  // tránh UI nhảy về loading mỗi lần có request mới.
+  List<DonHangModel> _homeOrders = <DonHangModel>[];
+  bool _isLoadingOrders = false;
+  String? _ordersError;
+
+  // Các biến quản lý API và trạng thái Trực tuyến
   late ApiServices _apiService;
   bool _isOnline = false;
   bool _isUpdatingStatus = false;
@@ -51,10 +59,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _isCheckingAssignment = false;
   bool _isOpeningAssignment = false;
 
+  // Task 1D - lifecycle foreground/background.
+  bool _isAppInForeground = true;
+  bool _isSyncingLifecycle = false;
+
   @override
   void initState() {
     super.initState();
-    
+
     // Đăng ký theo dõi vòng đời của app
     WidgetsBinding.instance.addObserver(this);
 
@@ -62,9 +74,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _apiService = ApiServices();
     _orderRepository = OrderRepository(_apiService);
     _shipperRepository = ShipperRepository(_apiService);
-    
-    // Mặc định mở app lên là Ngoại tuyến -> chưa gọi API đơn hàng
-    _forceOfflineSilently();
+
+    // Không ép Shipper Offline khi Home được tạo.
+    // Đồng bộ trạng thái thật đang lưu ở backend.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fetchInitialStatus();
+    });
   }
 
   @override
@@ -75,36 +90,73 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  // Hàm lắng nghe khi tắt app
+  // Theo dõi foreground/background của app.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    
-    // 'detached' là trạng thái khi người dùng vuốt tắt ứng dụng hoàn toàn
-    if (state == AppLifecycleState.detached) {
-      if (_isOnline) {
-        _forceOfflineSilently();
-      }
+
+    switch (state) {
+      case AppLifecycleState.resumed:
+        _isAppInForeground = true;
+        _resumeOnlineServices();
+        break;
+
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.hidden:
+        _isAppInForeground = false;
+
+        // App không còn foreground:
+        // - dừng polling 5 giây;
+        // - dừng GPS foreground stream;
+        // - KHÔNG đổi trạng thái backend thành NgoaiTuyen.
+        _stopAssignmentPolling();
+        _stopLocationTracking();
+        break;
+
+      case AppLifecycleState.detached:
+        _isAppInForeground = false;
+        _stopAssignmentPolling();
+        _stopLocationTracking();
+
+        // Best-effort giống behavior cũ khi process thực sự bị detach.
+        if (_isOnline) {
+          _forceOfflineSilently();
+        }
+        break;
+    }
+  }
+
+  Future<void> _resumeOnlineServices() async {
+    if (_isSyncingLifecycle || !mounted) return;
+
+    _isSyncingLifecycle = true;
+
+    try {
+      // Backend là nguồn sự thật cho trạng thái Online/Offline.
+      await _fetchInitialStatus();
+    } catch (e) {
+      debugPrint('[SHIPPER_LIFECYCLE] Resume sync failed: $e');
+    } finally {
+      _isSyncingLifecycle = false;
     }
   }
 
   // Hàm gọi API chuyển Ngoại tuyến "ngầm" (Không hiện thông báo, không loading)
   Future<void> _forceOfflineSilently() async {
+    _stopAssignmentPolling();
     await _stopLocationTracking();
 
     try {
       final prefs = await SharedPreferences.getInstance();
       final maSp = prefs.getString('maSp');
-      
+
       if (maSp != null && maSp.isNotEmpty) {
-        final body = {
-          "maShipper": maSp,
-          "trangThaiMoi": "NgoaiTuyen"
-        };
+        final body = {"maShipper": maSp, "trangThaiMoi": "NgoaiTuyen"};
 
         // Gọi API ép về Ngoại tuyến
         await _apiService.post('/api/Shipper/doi-trang-thai-hoat-dong', body);
-        
+
         if (mounted) {
           setState(() {
             _isOnline = false;
@@ -113,7 +165,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         }
       }
     } catch (e) {
-      debugPrint('Lỗi force offline: $e'); 
+      debugPrint('Lỗi force offline: $e');
     }
   }
 
@@ -135,20 +187,69 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       debugPrint('Lỗi lấy trạng thái ban đầu ở Home: $e');
     }
 
-    // Đồng bộ danh sách đơn hàng theo đúng trạng thái vừa lấy được
-    if (_isOnline) {
-      await _loadOrders();
+    // Đồng bộ service theo trạng thái backend.
+    if (_isOnline && _isAppInForeground) {
+      await _loadOrders(showLoading: _homeOrders.isEmpty);
       _startAssignmentPolling();
       await _startLocationTracking(showPermissionError: false);
     } else {
       _stopAssignmentPolling();
       await _stopLocationTracking();
-      _clearOrders();
+
+      // Chỉ clear order khi backend thật sự đang Offline.
+      // Background/pause không được làm mất UI data đang có.
+      if (!_isOnline) {
+        _clearOrders();
+      }
     }
   }
 
-  // Gọi API lấy DANH SÁCH ĐƠN CHỜ NHẬN khi đang Trực tuyến
-  Future<void> _loadOrders() async {
+  /// Lấy dữ liệu Home khi Shipper đang Online.
+  ///
+  /// Gồm 2 nhóm:
+  /// 1. Đơn Admin đã chỉ định riêng cho Shipper (ChoShipperXacNhan).
+  /// 2. Pool đơn đang ChoXacNhan, chưa được phân cho ai.
+  ///
+  /// Business rule hiện tại:
+  /// - Pool ChoXacNhan: Shipper có thể tự nhận trực tiếp.
+  /// - ChoShipperXacNhan: Admin đã chỉ định, Shipper phản hồi Nhận/Từ chối.
+  Future<({List<DonHangModel> assigned, List<DonHangModel> homeOrders})>
+  _fetchHomeOrders(String maSp) async {
+    final results = await Future.wait([
+      _orderRepository.getAssignedOrdersWaitingConfirmation(maSp),
+      _orderRepository.getOrdersAvailableToAccept(),
+    ]);
+
+    final assigned = results[0];
+    final availablePool = results[1];
+
+    // Ưu tiên đơn đã được chỉ định lên đầu Home.
+    // Dedupe theo MaDH để an toàn nếu backend thay đổi query về sau.
+    final mergedById = <String, DonHangModel>{};
+
+    for (final order in assigned) {
+      mergedById[order.maDh] = order;
+    }
+
+    for (final order in availablePool) {
+      mergedById.putIfAbsent(order.maDh, () => order);
+    }
+
+    final homeOrders = mergedById.values.toList();
+
+    return (assigned: assigned, homeOrders: homeOrders);
+  }
+
+  // Tải danh sách đơn Admin đang chỉ định cho Shipper.
+  //
+  // showLoading = true:
+  // - dùng khi vừa Online / load chủ động;
+  // - có thể hiện loading lần đầu.
+  //
+  // showLoading = false:
+  // - dùng cho polling nền;
+  // - tuyệt đối không làm UI nhảy về spinner.
+  Future<void> _loadOrders({bool showLoading = true}) async {
     final prefs = await SharedPreferences.getInstance();
     final maSp = prefs.getString('maSp');
 
@@ -157,17 +258,80 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       return;
     }
 
-    if (mounted) {
+    if (showLoading && mounted) {
       setState(() {
-        _futureOrders = _orderRepository.getAssignedOrdersWaitingConfirmation(maSp);
+        _isLoadingOrders = true;
+        _ordersError = null;
       });
     }
+
+    try {
+      final homeData = await _fetchHomeOrders(maSp);
+
+      if (!mounted) return;
+
+      _applyOrdersIfChanged(homeData.homeOrders);
+
+      if (showLoading) {
+        setState(() {
+          _isLoadingOrders = false;
+          _ordersError = null;
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+
+      if (showLoading) {
+        setState(() {
+          _isLoadingOrders = false;
+          _ordersError = e.toString().replaceAll('Exception: ', '');
+        });
+      } else {
+        // Polling nền lỗi thì chỉ log, giữ nguyên dữ liệu cũ trên UI.
+        debugPrint('Lỗi polling danh sách đơn: $e');
+      }
+    }
+  }
+
+  bool _hasSameHomeOrders(
+    List<DonHangModel> current,
+    List<DonHangModel> incoming,
+  ) {
+    if (current.length != incoming.length) return false;
+
+    for (var i = 0; i < current.length; i++) {
+      final a = current[i];
+      final b = incoming[i];
+
+      if (a.maDh != b.maDh ||
+          a.trangThai != b.trangThai ||
+          a.tenNguoiNhan != b.tenNguoiNhan ||
+          a.diaChiLay != b.diaChiLay ||
+          a.diaChiGiao != b.diaChiGiao ||
+          a.khoiLuong != b.khoiLuong ||
+          a.tienCod != b.tienCod) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  void _applyOrdersIfChanged(List<DonHangModel> orders) {
+    if (!mounted || _hasSameHomeOrders(_homeOrders, orders)) {
+      return;
+    }
+
+    setState(() {
+      _homeOrders = List<DonHangModel>.unmodifiable(orders);
+      _ordersError = null;
+    });
   }
 
   void _startAssignmentPolling() {
     _assignmentPollingTimer?.cancel();
 
-    if (!_isOnline) return;
+    if (!_isOnline || !_isAppInForeground) return;
 
     _checkAssignedOrdersAndPrompt();
     _assignmentPollingTimer = Timer.periodic(
@@ -182,7 +346,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _checkAssignedOrdersAndPrompt() async {
-    if (!_isOnline || _isCheckingAssignment || _isOpeningAssignment || !mounted) {
+    if (!_isOnline ||
+        !_isAppInForeground ||
+        _isCheckingAssignment ||
+        _isOpeningAssignment ||
+        !mounted) {
       return;
     }
 
@@ -194,18 +362,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
       if (maSp == null || maSp.isEmpty) return;
 
-      final orders = await _orderRepository.getAssignedOrdersWaitingConfirmation(maSp);
+      final homeData = await _fetchHomeOrders(maSp);
+      final assignedOrders = homeData.assigned;
 
       if (!mounted) return;
 
-      setState(() {
-        _futureOrders = Future.value(orders);
-      });
+      // Polling chạy ngầm: Home hiển thị cả pool + assignment,
+      // nhưng chỉ rebuild nếu dữ liệu thật sự thay đổi.
+      _applyOrdersIfChanged(homeData.homeOrders);
 
-      // Kiểm tra nếu có đơn ChoShipperXacNhan thì popup (chống spam bằng _notifiedOrderIds)
-      for (var order in orders) {
-        if (order.trangThai == 'ChoShipperXacNhan' && !_notifiedOrderIds.contains(order.maDh)) {
-          _notifiedOrderIds.add(order.maDh); 
+      // Đồng bộ bộ nhớ popup CHỈ với assignment thật từ backend.
+      // Nếu một đơn đã rời khỏi ChoShipperXacNhan thì cùng MaDH
+      // phải được phép popup lại nếu Admin phân lại sau đó.
+      final currentAssignedOrderIds = assignedOrders
+          .where((order) => order.trangThai == 'ChoShipperXacNhan')
+          .map((order) => order.maDh)
+          .toSet();
+
+      _notifiedOrderIds.removeWhere(
+        (orderId) => !currentAssignedOrderIds.contains(orderId),
+      );
+
+      // Kiểm tra nếu có đơn ChoShipperXacNhan thì popup
+      // (chống spam bằng _notifiedOrderIds)
+      for (final order in assignedOrders) {
+        if (order.trangThai == 'ChoShipperXacNhan' &&
+            !_notifiedOrderIds.contains(order.maDh)) {
+          _notifiedOrderIds.add(order.maDh);
           _showAssignedOrderPopup(order);
           break; // Chỉ popup 1 đơn mỗi lần
         }
@@ -223,15 +406,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     showDialog(
       context: context,
-      barrierDismissible: false, 
+      barrierDismissible: false,
       builder: (context) {
         return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           title: Row(
             children: [
               Icon(Icons.local_shipping, color: _primaryRed),
               const SizedBox(width: 8),
-              const Text('Đơn hàng chỉ định!', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const Text(
+                'Đơn hàng chỉ định!',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
             ],
           ),
           content: Text(
@@ -241,6 +429,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           actions: [
             TextButton(
               onPressed: () {
+                // "Để sau" chỉ đóng popup hiện tại.
+                // Polling sau vẫn được phép nhắc lại cùng đơn này.
+                _notifiedOrderIds.remove(order.maDh);
                 _isOpeningAssignment = false;
                 Navigator.pop(context);
               },
@@ -248,41 +439,60 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
             ElevatedButton(
               onPressed: () async {
-                Navigator.pop(context); 
-                
-                await Navigator.push(
+                Navigator.pop(context);
+
+                final result = await Navigator.push<String>(
                   context,
                   MaterialPageRoute(
                     builder: (context) => OrderAcceptScreen(maDh: order.maDh),
                   ),
                 );
-                
+
+                // Từ chối/timeout trả đơn về điều phối.
+                // Xóa MaDH khỏi bộ nhớ popup ngay để Admin có thể phân lại
+                // chính đơn đó mà Shipper vẫn nhận được popup.
+                if (result == 'rejected' || result == 'timeout') {
+                  _notifiedOrderIds.remove(order.maDh);
+                }
+
                 _isOpeningAssignment = false;
                 if (mounted && _isOnline) {
-                  await _loadOrders(); // Tải lại danh sách sau khi xem chi tiết
+                  await _loadOrders(showLoading: false);
+                  await _checkAssignedOrdersAndPrompt();
                 }
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: _primaryRed,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
               ),
-              child: const Text('Xem ngay', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              child: const Text(
+                'Xem ngay',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
           ],
         );
-      }
+      },
     );
   }
 
   // Xoá danh sách đơn hàng khi chuyển sang Ngoại tuyến (không gọi API)
   void _clearOrders() {
-    if (mounted) {
-      setState(() {
-        _futureOrders = Future.value(<DonHangModel>[]);
-      });
-    }
+    if (!mounted) return;
+
+    setState(() {
+      _homeOrders = <DonHangModel>[];
+      _isLoadingOrders = false;
+      _ordersError = null;
+      _notifiedOrderIds.clear();
+    });
   }
-  
+
   Future<void> _sendGpsPosition(String maSp, Position position) async {
     await _shipperRepository.updateGpsLocation(
       maShipper: maSp,
@@ -290,11 +500,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       viDo: position.latitude,
     );
 
-    debugPrint('[SHIPPER_GPS] Sent lat=${position.latitude}, lng=${position.longitude}');
+    debugPrint(
+      '[SHIPPER_GPS] Sent lat=${position.latitude}, lng=${position.longitude}',
+    );
   }
 
   Future<void> _startLocationTracking({bool showPermissionError = true}) async {
-    if (_isStartingLocationTracking) return;
+    if (_isStartingLocationTracking ||
+        !_isOnline ||
+        !_isAppInForeground ||
+        !mounted) {
+      return;
+    }
 
     _isStartingLocationTracking = true;
 
@@ -312,28 +529,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       // Gửi GPS ngay 1 lần khi vừa Online.
       final currentPosition = await _locationService.getCurrentPosition();
 
-      if (!_isOnline) return;
+      if (!_isOnline || !_isAppInForeground) return;
 
       await _sendGpsPosition(maSp, currentPosition);
 
-      if (!_isOnline) return;
+      if (!_isOnline || !_isAppInForeground) return;
 
       // Sau đó chỉ gửi tiếp khi di chuyển ít nhất 15m.
       _positionSubscription = _locationService
           .watchPosition(distanceFilterMeters: 15)
           .listen(
-        (position) async {
-          if (!_isOnline) return;
-          try {
-            await _sendGpsPosition(maSp, position);
-          } catch (e) {
-            debugPrint('[SHIPPER_GPS] Update failed: $e');
-          }
-        },
-        onError: (Object error) {
-          debugPrint('[SHIPPER_GPS] Stream error: $error');
-        },
-      );
+            (position) async {
+              if (!_isOnline || !_isAppInForeground) return;
+              try {
+                await _sendGpsPosition(maSp, position);
+              } catch (e) {
+                debugPrint('[SHIPPER_GPS] Update failed: $e');
+              }
+            },
+            onError: (Object error) {
+              debugPrint('[SHIPPER_GPS] Stream error: $error');
+            },
+          );
     } catch (e) {
       debugPrint('[SHIPPER_GPS] Start tracking failed: $e');
 
@@ -363,7 +580,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // Hàm chuyển đổi trạng thái khi bấm nút trên màn hình
   Future<void> _toggleOnlineStatus() async {
     setState(() {
-      _isUpdatingStatus = true; 
+      _isUpdatingStatus = true;
     });
 
     try {
@@ -377,13 +594,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         return;
       }
 
-      final newValue = !_isOnline; 
+      final newValue = !_isOnline;
       final trangThaiMoi = newValue ? 'TrucTuyen' : 'NgoaiTuyen';
 
-      final body = {
-        "maShipper": maSp,
-        "trangThaiMoi": trangThaiMoi
-      };
+      final body = {"maShipper": maSp, "trangThaiMoi": trangThaiMoi};
 
       await _apiService.post('/api/Shipper/doi-trang-thai-hoat-dong', body);
 
@@ -395,8 +609,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
       if (newValue) {
         await _loadOrders();
-        _startAssignmentPolling();
-        await _startLocationTracking();
+
+        if (_isAppInForeground) {
+          _startAssignmentPolling();
+          await _startLocationTracking();
+        }
       } else {
         _stopAssignmentPolling();
         await _stopLocationTracking();
@@ -406,7 +623,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Lỗi cập nhật: ${e.toString().replaceAll('Exception: ', '')}'),
+            content: Text(
+              'Lỗi cập nhật: ${e.toString().replaceAll('Exception: ', '')}',
+            ),
             backgroundColor: Colors.red,
           ),
         );
@@ -469,14 +688,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       case 0:
         return _buildHomeTab();
       case 1:
-        return const OrderListTab();  
+        return const OrderListTab();
       case 2:
         return const FinanceTab();
       case 3:
         return ProfileScreen(
           onBackPressed: () {
             setState(() {
-              _currentIndex = _previousIndex; 
+              _currentIndex = _previousIndex;
             });
             if (_previousIndex == 0) {
               _fetchInitialStatus();
@@ -500,7 +719,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             _buildStatsRow(),
             const SizedBox(height: 24),
             const Text(
-              'Đơn hàng',
+              'Đơn hàng đang chờ',
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
@@ -508,7 +727,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
             ),
             const SizedBox(height: 12),
-            _buildOrderSection(), 
+            _buildOrderSection(),
           ],
         ),
       ),
@@ -522,10 +741,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         child: Center(
           child: Column(
             children: [
-              Icon(Icons.wifi_off_rounded, size: 32, color: Colors.grey.shade400),
+              Icon(
+                Icons.wifi_off_rounded,
+                size: 32,
+                color: Colors.grey.shade400,
+              ),
               const SizedBox(height: 8),
               const Text(
-                'Bạn đang Ngoại tuyến.\nBật Trực tuyến để bắt đầu nhận đơn hàng.',
+                'Bạn đang Ngoại tuyến.\n'
+                'Bật Trực tuyến để bắt đầu nhận đơn hàng.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: Colors.grey, fontSize: 14),
               ),
@@ -535,49 +759,59 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       );
     }
 
-    return FutureBuilder<List<DonHangModel>>(
-      future: _futureOrders,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Padding(
-            padding: EdgeInsets.all(32.0),
-            child: Center(child: CircularProgressIndicator()),
-          );
-        } 
-        else if (snapshot.hasError) {
-          return Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Center(
-              child: Text(
-                'Lỗi tải đơn hàng: ${snapshot.error}',
+    // Chỉ hiện spinner ở lần load đầu tiên khi chưa có dữ liệu cũ.
+    if (_isLoadingOrders && _homeOrders.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.all(32.0),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_ordersError != null && _homeOrders.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Lỗi tải đơn hàng: $_ordersError',
                 style: const TextStyle(color: Colors.red),
                 textAlign: TextAlign.center,
               ),
-            ),
-          );
-        } 
-        else if (!snapshot.hasData || snapshot.data!.isEmpty) {
-          return const Padding(
-            padding: EdgeInsets.all(16.0),
-            child: Center(
-              child: Text(
-                'Chưa có đơn nào được Admin chỉ định cho bạn.',
-                style: TextStyle(color: Colors.grey, fontSize: 15),
+              const SizedBox(height: 8),
+              TextButton.icon(
+                onPressed: () => _loadOrders(),
+                icon: const Icon(Icons.refresh),
+                label: const Text('Thử lại'),
               ),
-            ),
-          );
-        }
-
-        final orders = snapshot.data!.take(5).toList();
-        return Column(
-          children: [
-            for (int i = 0; i < orders.length; i++) ...[
-              _buildOrderCard(orders[i]),
-              if (i != orders.length - 1) const SizedBox(height: 12),
             ],
-          ],
-        );
-      },
+          ),
+        ),
+      );
+    }
+
+    if (_homeOrders.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.all(16.0),
+        child: Center(
+          child: Text(
+            'Hiện chưa có đơn chờ điều phối hoặc đơn được chỉ định.',
+            style: TextStyle(color: Colors.grey, fontSize: 15),
+          ),
+        ),
+      );
+    }
+
+    final orders = _homeOrders.take(5).toList();
+
+    return Column(
+      children: [
+        for (int i = 0; i < orders.length; i++) ...[
+          _buildOrderCard(orders[i]),
+          if (i != orders.length - 1) const SizedBox(height: 12),
+        ],
+      ],
     );
   }
 
@@ -595,10 +829,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           GestureDetector(
             onTap: _isUpdatingStatus ? null : _toggleOnlineStatus,
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 300), 
+              duration: const Duration(milliseconds: 300),
               padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 48),
               decoration: BoxDecoration(
-                color: _isOnline ? _primaryRed : Colors.white, 
+                color: _isOnline ? _primaryRed : Colors.white,
                 borderRadius: BorderRadius.circular(30),
                 border: Border.all(
                   color: _isOnline ? Colors.transparent : Colors.grey.shade400,
@@ -611,7 +845,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       width: 22,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: _isOnline ? Colors.white : _primaryRed, 
+                        color: _isOnline ? Colors.white : _primaryRed,
                       ),
                     )
                   : Text(
@@ -619,14 +853,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
-                        color: _isOnline ? Colors.white : Colors.black87, 
+                        color: _isOnline ? Colors.white : Colors.black87,
                       ),
                     ),
             ),
           ),
           const SizedBox(height: 12),
           Text(
-            _isOnline 
+            _isOnline
                 ? 'Bạn sẽ nhận đơn mới khi đang Trực tuyến'
                 : 'Đang nghỉ ngơi, bạn sẽ không nhận đơn',
             style: const TextStyle(color: Colors.grey, fontSize: 14),
@@ -642,7 +876,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         Expanded(child: _buildStatItem('ĐƠN HÔM NAY', '12')),
         const SizedBox(width: 8),
         Expanded(
-          child: _buildStatItem('COD ĐANG G...', '1.250.000', valueColor: Colors.deepOrange),
+          child: _buildStatItem(
+            'COD ĐANG G...',
+            '1.250.000',
+            valueColor: Colors.deepOrange,
+          ),
         ),
         const SizedBox(width: 8),
         Expanded(child: _buildStatItem('QUÃNG ĐƯỜ...', '45.8')),
@@ -709,6 +947,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildOrderCard(DonHangModel order) {
+    final isAssigned = order.trangThai == 'ChoShipperXacNhan';
+    final isWaitingForDispatch = order.trangThai == 'ChoXacNhan';
+
+    final statusColor = isAssigned
+        ? _primaryRed
+        : isWaitingForDispatch
+        ? Colors.orange.shade700
+        : Colors.grey.shade700;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -723,22 +970,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                order.maDh, 
+                order.maDh,
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 14,
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
-                  color: _primaryRed.withOpacity(0.1),
+                  color: statusColor.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  _trangThaiLabel(order.trangThai), 
+                  _trangThaiLabel(order.trangThai),
                   style: TextStyle(
-                    color: _primaryRed,
+                    color: statusColor,
                     fontWeight: FontWeight.bold,
                     fontSize: 12,
                   ),
@@ -751,21 +1001,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             children: [
               Icon(Icons.person_outline, size: 20, color: Colors.grey.shade600),
               const SizedBox(width: 8),
-              Text(
-                order.tenNguoiNhan, 
-                style: const TextStyle(fontSize: 15),
-              ),
+              Text(order.tenNguoiNhan, style: const TextStyle(fontSize: 15)),
             ],
           ),
           const SizedBox(height: 12),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.location_on_outlined, size: 20, color: Colors.grey.shade600),
+              Icon(
+                Icons.location_on_outlined,
+                size: 20,
+                color: Colors.grey.shade600,
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  order.diaChiGiao, 
+                  order.diaChiGiao,
                   style: const TextStyle(fontSize: 15),
                 ),
               ),
@@ -774,30 +1025,79 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
-            child: OutlinedButton(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => OrderAcceptScreen(maDh: order.maDh),
+            child: isAssigned
+                ? OutlinedButton(
+                    onPressed: () async {
+                      final result = await Navigator.push<String>(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              OrderAcceptScreen(maDh: order.maDh),
+                        ),
+                      );
+
+                      if (result == 'rejected' || result == 'timeout') {
+                        _notifiedOrderIds.remove(order.maDh);
+                      }
+
+                      if (mounted && _isOnline) {
+                        await _loadOrders(showLoading: false);
+                        await _checkAssignedOrdersAndPrompt();
+                      }
+                    },
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      side: BorderSide(color: _primaryRed),
+                    ),
+                    child: Text(
+                      'XEM & PHẢN HỒI ĐƠN',
+                      style: TextStyle(
+                        color: _primaryRed,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  )
+                : ElevatedButton.icon(
+                    onPressed: () async {
+                      await Navigator.push<String>(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => OrderAcceptScreen(
+                            maDh: order.maDh,
+                            isSelfAccept: true,
+                          ),
+                        ),
+                      );
+
+                      if (mounted && _isOnline) {
+                        await _loadOrders(showLoading: false);
+                        await _checkAssignedOrdersAndPrompt();
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _primaryRed,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      elevation: 0,
+                    ),
+                    icon: const Icon(
+                      Icons.add_task,
+                      color: Colors.white,
+                      size: 18,
+                    ),
+                    label: const Text(
+                      'TỰ NHẬN ĐƠN',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
-                );
-              },
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                side: BorderSide(color: Colors.grey.shade300),
-              ),
-              child: const Text(
-                'XEM CHI TIẾT',
-                style: TextStyle(
-                  color: Colors.black87,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
           ),
         ],
       ),
@@ -825,24 +1125,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
- Widget _buildNavItem(IconData icon, String label, int index) {
+  Widget _buildNavItem(IconData icon, String label, int index) {
     bool isActive = _currentIndex == index;
 
     return GestureDetector(
       onTap: () {
         if (_currentIndex != index) {
           setState(() {
-            _previousIndex = _currentIndex; 
-            _currentIndex = index; 
+            _previousIndex = _currentIndex;
+            _currentIndex = index;
           });
-          
+
           if (index == 0) {
             _fetchInitialStatus();
           }
         }
       },
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200), 
+        duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: isActive
             ? BoxDecoration(
@@ -856,10 +1156,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              icon,
-              color: isActive ? Colors.white : Colors.grey.shade800,
-            ),
+            Icon(icon, color: isActive ? Colors.white : Colors.grey.shade800),
             const SizedBox(height: 4),
             Text(
               label,

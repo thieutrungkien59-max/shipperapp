@@ -1,7 +1,8 @@
 import 'package:latlong2/latlong.dart';
-import '../../services/api_service.dart';
+
 import '../../models/don_hang_model.dart';
 import '../../models/shipping_quote_model.dart';
+import '../../services/api_service.dart';
 
 class OrderRepository {
   final ApiServices _apiService;
@@ -18,16 +19,24 @@ class OrderRepository {
     else if (response is Map<String, dynamic>) {
       // Backend .NET thường bọc list trong biến "$values" hoặc "data"
       if (response.containsKey('\$values') && response['\$values'] is List) {
-        return (response['\$values'] as List).map((json) => DonHangModel.fromJson(json)).toList();
+        return (response['\$values'] as List)
+            .map((json) => DonHangModel.fromJson(json))
+            .toList();
       } else if (response.containsKey('data') && response['data'] is List) {
-        return (response['data'] as List).map((json) => DonHangModel.fromJson(json)).toList();
+        return (response['data'] as List)
+            .map((json) => DonHangModel.fromJson(json))
+            .toList();
       } else {
-        throw Exception('API trả về Object nhưng không tìm thấy mảng. Nội dung: $response');
+        throw Exception(
+          'API trả về Object nhưng không tìm thấy mảng. Nội dung: $response',
+        );
       }
     }
     // Kịch bản 3: Các trường hợp khác
     else {
-      throw Exception('Dữ liệu từ Server không đúng chuẩn danh sách. Kiểu thực tế: ${response.runtimeType}');
+      throw Exception(
+        'Dữ liệu từ Server không đúng chuẩn danh sách. Kiểu thực tế: ${response.runtimeType}',
+      );
     }
   }
 
@@ -57,6 +66,27 @@ class OrderRepository {
     }
   }
 
+  // SHIPPER TỰ NHẬN ĐƠN TỪ POOL ChoXacNhan.
+  //
+  // Backend sẽ:
+  // - kiểm tra Shipper online + hồ sơ đã duyệt;
+  // - kiểm tra tải trọng còn lại;
+  // - atomically claim đơn nếu nó vẫn còn ChoXacNhan;
+  // - gán MaSp và chuyển thẳng sang DaXacNhan.
+  Future<void> selfAcceptAvailableOrder({
+    required String maDonHang,
+    required String maShipper,
+  }) async {
+    try {
+      await _apiService.post('/api/DonHang/shipper-tu-nhan-don', {
+        'maDonHang': maDonHang,
+        'maShipper': maShipper,
+      });
+    } catch (e) {
+      throw Exception(e.toString().replaceAll('Exception: ', ''));
+    }
+  }
+
   // SHIPPER NHẬN / TỪ CHỐI ĐƠN ĐÃ ĐƯỢC ADMIN CHỈ ĐỊNH.
   Future<void> respondToAssignedOrder({
     required String maDonHang,
@@ -65,15 +95,12 @@ class OrderRepository {
     String? lyDo,
   }) async {
     try {
-      await _apiService.post(
-        '/api/DonHang/shipper-phan-hoi-don',
-        {
-          'maDonHang': maDonHang,
-          'maShipper': maShipper,
-          'chapNhan': chapNhan,
-          'lyDo': lyDo,
-        },
-      );
+      await _apiService.post('/api/DonHang/shipper-phan-hoi-don', {
+        'maDonHang': maDonHang,
+        'maShipper': maShipper,
+        'chapNhan': chapNhan,
+        'lyDo': lyDo,
+      });
     } catch (e) {
       throw Exception(e.toString().replaceAll('Exception: ', ''));
     }
@@ -116,7 +143,7 @@ class OrderRepository {
       };
 
       await _apiService.post('/api/DonHang/cap-nhat-trang-thai', body);
-      return true; 
+      return true;
     } catch (e) {
       throw Exception('Lỗi khi cập nhật trạng thái đơn: $e');
     }
@@ -177,7 +204,10 @@ class OrderRepository {
         "kinhDoGiao": delivery.longitude,
       };
 
-      final response = await _apiService.post('/api/DonHang/tinh-phi-van-chuyen', body);
+      final response = await _apiService.post(
+        '/api/DonHang/tinh-phi-van-chuyen',
+        body,
+      );
       if (response is! Map) {
         throw Exception('Backend trả dữ liệu tính tuyến đường không hợp lệ.');
       }
@@ -194,7 +224,9 @@ class OrderRepository {
   // (khi đó hàm này vẫn hoạt động, chỉ là chuỗi trả về sẽ rỗng/không dùng được).
   Future<String> sendOtp(String soDienThoai) async {
     try {
-      final response = await _apiService.post('/api/DonHang/gui-otp', {"soDienThoai": soDienThoai});
+      final response = await _apiService.post('/api/DonHang/gui-otp', {
+        "soDienThoai": soDienThoai,
+      });
       if (response is Map && response['maOtp'] != null) {
         return response['maOtp'].toString();
       }

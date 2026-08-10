@@ -1,15 +1,25 @@
-import 'package:flutter/material.dart';
 import 'dart:async';
+
+import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../../map_tracking/screens/map_delivery_screen.dart';
+
+import '../../../core/repositories/order_repository.dart';
 import '../../../models/don_hang_model.dart';
 import '../../../services/api_service.dart';
-import '../../../core/repositories/order_repository.dart';
+import '../../map_tracking/screens/map_delivery_screen.dart';
 
 class OrderAcceptScreen extends StatefulWidget {
   final String maDh;
 
-  const OrderAcceptScreen({Key? key, required this.maDh}) : super(key: key);
+  // false: đơn do Admin chỉ định (ChoShipperXacNhan)
+  // true : Shipper tự chọn đơn từ pool ChoXacNhan
+  final bool isSelfAccept;
+
+  const OrderAcceptScreen({
+    Key? key,
+    required this.maDh,
+    this.isSelfAccept = false,
+  }) : super(key: key);
 
   @override
   State<OrderAcceptScreen> createState() => _OrderAcceptScreenState();
@@ -17,7 +27,9 @@ class OrderAcceptScreen extends StatefulWidget {
 
 class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
   // Bộ đếm thời gian 30 giây (chỉ chạy sau khi đã tải xong dữ liệu)
-  int _timeLeft = 30;
+  late int _timeLeft;
+
+  int get _countdownTotalSeconds => widget.isSelfAccept ? 30 : 60;
   Timer? _timer;
   bool _isAccepting = false;
   bool _isReleasing = false;
@@ -38,11 +50,16 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
   late final ApiServices _apiService;
 
   // Đơn hàng có vượt tải trọng tối đa xe của Shipper hay không
-  bool get _isOverWeight => _order != null && _order!.khoiLuong > _taiTrongXe && _taiTrongXe > 0;
+  bool get _isOverWeight =>
+      _order != null && _order!.khoiLuong > _taiTrongXe && _taiTrongXe > 0;
 
   @override
   void initState() {
     super.initState();
+
+    // Auto/Admin assignment có 60 giây theo business rule.
+    // Đơn Shipper tự chọn từ pool vẫn giữ 30 giây.
+    _timeLeft = _countdownTotalSeconds;
     _apiService = ApiServices();
     _orderRepository = OrderRepository(_apiService);
     _loadData();
@@ -61,7 +78,10 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
       // Gọi song song: chi tiết đơn hàng + hồ sơ Shipper (để lấy tải trọng tối đa xe)
       final results = await Future.wait([
         _orderRepository.getOrderDetail(widget.maDh),
-        if (maTk != null && maTk.isNotEmpty) _apiService.get('/api/Auth/profile/$maTk') else Future.value(null),
+        if (maTk != null && maTk.isNotEmpty)
+          _apiService.get('/api/Auth/profile/$maTk')
+        else
+          Future.value(null),
       ]);
 
       final order = results[0] as DonHangModel;
@@ -103,6 +123,7 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
         _handleRejectOrder(
           reason: 'Hết 30 giây không phản hồi',
           showMessage: false,
+          isTimeout: true,
         );
       }
     });
@@ -110,7 +131,8 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
 
   @override
   void dispose() {
-    _timer?.cancel(); // Đảm bảo hủy timer khi thoát màn hình để tránh lỗi memory leak
+    _timer
+        ?.cancel(); // Đảm bảo hủy timer khi thoát màn hình để tránh lỗi memory leak
     super.dispose();
   }
 
@@ -131,12 +153,21 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
         throw Exception('Không tìm thấy mã Shipper, vui lòng đăng nhập lại.');
       }
 
-      // Chỉ nhận được đơn đang được Admin chỉ định cho chính Shipper này.
-      await _orderRepository.respondToAssignedOrder(
-        maDonHang: _order!.maDh,
-        maShipper: maSp,
-        chapNhan: true,
-      );
+      if (widget.isSelfAccept) {
+        // Shipper tự nhận từ pool ChoXacNhan.
+        // Backend sẽ atomically claim đơn, gán MaSp và chuyển DaXacNhan.
+        await _orderRepository.selfAcceptAvailableOrder(
+          maDonHang: _order!.maDh,
+          maShipper: maSp,
+        );
+      } else {
+        // Flow cũ: đơn đã được Admin chỉ định cho chính Shipper này.
+        await _orderRepository.respondToAssignedOrder(
+          maDonHang: _order!.maDh,
+          maShipper: maSp,
+          chapNhan: true,
+        );
+      }
 
       if (!mounted) return;
 
@@ -154,7 +185,9 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Lỗi nhận đơn: ${e.toString().replaceAll('Exception: ', '')}'),
+            content: Text(
+              'Lỗi nhận đơn: ${e.toString().replaceAll('Exception: ', '')}',
+            ),
             backgroundColor: Colors.red,
           ),
         );
@@ -167,6 +200,7 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
   Future<void> _handleRejectOrder({
     String reason = 'Shipper từ chối đơn',
     bool showMessage = true,
+    bool isTimeout = false,
   }) async {
     if (_order == null || _isReleasing) return;
 
@@ -177,6 +211,16 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
     });
 
     try {
+      // Với đơn tự chọn từ pool, Shipper CHƯA sở hữu đơn.
+      // Từ chối/timeout chỉ đóng màn hình; không được gọi API trả đơn,
+      // vì đơn vẫn đang ChoXacNhan và MaSp vẫn null.
+      if (widget.isSelfAccept) {
+        if (!mounted) return;
+
+        Navigator.pop(context, isTimeout ? 'self_timeout' : 'self_cancelled');
+        return;
+      }
+
       final prefs = await SharedPreferences.getInstance();
       final maSp = prefs.getString('maSp');
 
@@ -201,7 +245,7 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
         );
       }
 
-      Navigator.pop(context);
+      Navigator.pop(context, isTimeout ? 'timeout' : 'rejected');
     } catch (e) {
       if (!mounted) return;
 
@@ -229,11 +273,7 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [
-              Color(0xFFFFF0F0), 
-              Color(0xFFFAF8F8),
-              Color(0xFFFAF8F8),
-            ],
+            colors: [Color(0xFFFFF0F0), Color(0xFFFAF8F8), Color(0xFFFAF8F8)],
             stops: [0.0, 0.3, 1.0],
           ),
         ),
@@ -241,31 +281,31 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
           child: _isLoading
               ? const Center(child: CircularProgressIndicator())
               : _loadError != null
-                  ? _buildErrorState()
-                  : Column(
-                      children: [
-                        const SizedBox(height: 16),
-                        const Text(
-                          'ĐƠN HÀNG MỚI',
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.black87,
-                            letterSpacing: 1.2,
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        _buildTimerCircle(),
-                        const SizedBox(height: 24),
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                            child: _buildOrderDetailsCard(),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                      ],
+              ? _buildErrorState()
+              : Column(
+                  children: [
+                    const SizedBox(height: 16),
+                    Text(
+                      widget.isSelfAccept ? 'ĐƠN CHỜ NHẬN' : 'ĐƠN HÀNG MỚI',
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.black87,
+                        letterSpacing: 1.2,
+                      ),
                     ),
+                    const SizedBox(height: 20),
+                    _buildTimerCircle(),
+                    const SizedBox(height: 24),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                        child: _buildOrderDetailsCard(),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                ),
         ),
       ),
     );
@@ -289,7 +329,10 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
             ElevatedButton(
               onPressed: _loadData,
               style: ElevatedButton.styleFrom(backgroundColor: _primaryRed),
-              child: const Text('Thử lại', style: TextStyle(color: Colors.white)),
+              child: const Text(
+                'Thử lại',
+                style: TextStyle(color: Colors.white),
+              ),
             ),
           ],
         ),
@@ -305,7 +348,7 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
           width: 140,
           height: 140,
           child: CircularProgressIndicator(
-            value: _timeLeft / 30.0, // Tính tỷ lệ cho vòng tròn
+            value: _timeLeft / _countdownTotalSeconds,
             strokeWidth: 8,
             backgroundColor: Colors.grey.shade200,
             valueColor: AlwaysStoppedAnimation<Color>(_primaryRed),
@@ -396,16 +439,20 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
               ),
             ),
           ),
-          
+
           // 2. PHẦN NÚT BẤM VÀ CẢNH BÁO (CỐ ĐỊNH, KHÔNG BỊ CUỘN)
           const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
             height: 54,
             child: ElevatedButton(
-              onPressed: (_isAccepting || _isReleasing || _isOverWeight) ? null : _handleAcceptOrder,
+              onPressed: (_isAccepting || _isReleasing || _isOverWeight)
+                  ? null
+                  : _handleAcceptOrder,
               style: ElevatedButton.styleFrom(
-                backgroundColor: _isOverWeight ? Colors.grey.shade400 : _primaryRed,
+                backgroundColor: _isOverWeight
+                    ? Colors.grey.shade400
+                    : _primaryRed,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -421,7 +468,11 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
                       ),
                     )
                   : Text(
-                      _isOverWeight ? 'VƯỢT TẢI TRỌNG XE' : 'XÁC NHẬN ĐƠN',
+                      _isOverWeight
+                          ? 'VƯỢT TẢI TRỌNG XE'
+                          : widget.isSelfAccept
+                          ? 'NHẬN ĐƠN'
+                          : 'XÁC NHẬN ĐƠN',
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
@@ -442,9 +493,9 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
                     height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Text(
-                    'TỪ CHỐI ĐƠN',
-                    style: TextStyle(
+                : Text(
+                    widget.isSelfAccept ? 'BỎ QUA ĐƠN' : 'TỪ CHỐI ĐƠN',
+                    style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       color: Colors.black54,
                     ),
@@ -479,9 +530,18 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Địa chỉ lấy hàng', style: TextStyle(color: Colors.black54, fontSize: 12)),
+                  const Text(
+                    'Địa chỉ lấy hàng',
+                    style: TextStyle(color: Colors.black54, fontSize: 12),
+                  ),
                   const SizedBox(height: 2),
-                  Text(order.diaChiLay, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                  Text(
+                    order.diaChiLay,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -496,9 +556,18 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Địa chỉ giao hàng', style: TextStyle(color: Colors.black54, fontSize: 12)),
+                  const Text(
+                    'Địa chỉ giao hàng',
+                    style: TextStyle(color: Colors.black54, fontSize: 12),
+                  ),
                   const SizedBox(height: 2),
-                  Text(order.diaChiGiao, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                  Text(
+                    order.diaChiGiao,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -521,16 +590,26 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
           Expanded(
             child: Row(
               children: [
-                Icon(Icons.person_outline, color: Colors.grey.shade700, size: 20),
+                Icon(
+                  Icons.person_outline,
+                  color: Colors.grey.shade700,
+                  size: 20,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Người nhận:', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                      const Text(
+                        'Người nhận:',
+                        style: TextStyle(fontSize: 12, color: Colors.black54),
+                      ),
                       Text(
                         order.tenNguoiNhan,
-                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                        ),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ],
@@ -544,13 +623,26 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.phone_outlined, color: Colors.grey.shade700, size: 20),
+                Icon(
+                  Icons.phone_outlined,
+                  color: Colors.grey.shade700,
+                  size: 20,
+                ),
                 const SizedBox(width: 8),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('SĐT:', style: TextStyle(fontSize: 12, color: Colors.black54)),
-                    Text(order.sdtNguoiNhan, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                    const Text(
+                      'SĐT:',
+                      style: TextStyle(fontSize: 12, color: Colors.black54),
+                    ),
+                    Text(
+                      order.sdtNguoiNhan,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ],
                 ),
               ],
@@ -568,7 +660,10 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Khối lượng', style: TextStyle(fontSize: 12, color: Colors.black54)),
+            const Text(
+              'Khối lượng',
+              style: TextStyle(fontSize: 12, color: Colors.black54),
+            ),
             const SizedBox(height: 4),
             Text(
               '${order.khoiLuong} kg',
@@ -583,7 +678,10 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
         Column(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            const Text('Thu hộ COD (VNĐ)', style: TextStyle(fontSize: 12, color: Colors.black54)),
+            const Text(
+              'Thu hộ COD (VNĐ)',
+              style: TextStyle(fontSize: 12, color: Colors.black54),
+            ),
             const SizedBox(height: 4),
             Text(
               order.tienCod.toStringAsFixed(0),
@@ -609,7 +707,11 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
       ),
       child: Row(
         children: [
-          Icon(Icons.warning_amber_rounded, color: Colors.red.shade700, size: 20),
+          Icon(
+            Icons.warning_amber_rounded,
+            color: Colors.red.shade700,
+            size: 20,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
