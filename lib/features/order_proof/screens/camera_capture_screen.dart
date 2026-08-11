@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 
@@ -31,7 +32,10 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
     try {
       final cameras = await availableCameras();
       if (cameras.isEmpty) {
-        if (mounted) setState(() => _errorMessage = 'Không tìm thấy camera trên thiết bị.');
+        if (mounted)
+          setState(
+            () => _errorMessage = 'Không tìm thấy camera trên thiết bị.',
+          );
         return;
       }
 
@@ -55,7 +59,10 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
       setState(() => _controller = controller);
     } catch (e) {
       if (mounted) {
-        setState(() => _errorMessage = 'Không thể mở camera: ${e.toString().replaceAll('Exception: ', '')}');
+        setState(
+          () => _errorMessage =
+              'Không thể mở camera: ${e.toString().replaceAll('Exception: ', '')}',
+        );
       }
     }
   }
@@ -68,7 +75,10 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
 
   Future<void> _capture() async {
     final controller = _controller;
-    if (controller == null || !controller.value.isInitialized || _isTakingPicture) return;
+    if (controller == null ||
+        !controller.value.isInitialized ||
+        _isTakingPicture)
+      return;
 
     setState(() => _isTakingPicture = true);
     try {
@@ -80,7 +90,9 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Chụp ảnh thất bại: ${e.toString().replaceAll('Exception: ', '')}'),
+            content: Text(
+              'Chụp ảnh thất bại: ${e.toString().replaceAll('Exception: ', '')}',
+            ),
             backgroundColor: Colors.red,
           ),
         );
@@ -106,7 +118,10 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
               child: IconButton(
                 icon: Container(
                   padding: const EdgeInsets.all(6),
-                  decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+                  decoration: const BoxDecoration(
+                    color: Colors.black45,
+                    shape: BoxShape.circle,
+                  ),
                   child: const Icon(Icons.close, color: Colors.white, size: 24),
                 ),
                 onPressed: () => Navigator.pop(context),
@@ -161,7 +176,9 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
 
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized) {
-      return const Center(child: CircularProgressIndicator(color: Colors.white));
+      return const Center(
+        child: CircularProgressIndicator(color: Colors.white),
+      );
     }
 
     return CameraPreview(controller);

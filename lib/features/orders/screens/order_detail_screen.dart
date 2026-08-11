@@ -1,18 +1,24 @@
-import 'package:flutter/material.dart';
 import 'dart:async';
+
+import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
-import '../../order_proof/screens/camera_proof_screen.dart';
+import 'package:latlong2/latlong.dart';
+
+import '../../../core/utils/call_utils.dart';
 import '../../../models/don_hang_model.dart';
 import '../../../services/location_service.dart';
-import '../../../core/utils/call_utils.dart';
+import '../../order_proof/screens/camera_proof_screen.dart';
 
 class OrderDetailScreen extends StatefulWidget {
   final bool isDeliveryPhase;
   final DonHangModel order;
 
-  const OrderDetailScreen({Key? key, this.isDeliveryPhase = false, required this.order}) : super(key: key);
+  const OrderDetailScreen({
+    Key? key,
+    this.isDeliveryPhase = false,
+    required this.order,
+  }) : super(key: key);
 
   @override
   State<OrderDetailScreen> createState() => _OrderDetailScreenState();
@@ -41,13 +47,20 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       final initialPosition = await _locationService.getCurrentPosition();
       if (!mounted) return;
       setState(() {
-        _currentLatLng = LatLng(initialPosition.latitude, initialPosition.longitude);
+        _currentLatLng = LatLng(
+          initialPosition.latitude,
+          initialPosition.longitude,
+        );
       });
       _mapController.move(_currentLatLng!, 15);
 
-      _positionSubscription = _locationService.watchPosition().listen((position) {
+      _positionSubscription = _locationService.watchPosition().listen((
+        position,
+      ) {
         if (!mounted) return;
-        setState(() => _currentLatLng = LatLng(position.latitude, position.longitude));
+        setState(
+          () => _currentLatLng = LatLng(position.latitude, position.longitude),
+        );
       });
     } catch (e) {
       if (mounted) {
@@ -113,12 +126,20 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         children: [
           const Text(
             'Chi tiết đơn hàng',
-            style: TextStyle(color: Colors.black87, fontSize: 18, fontWeight: FontWeight.bold),
+            style: TextStyle(
+              color: Colors.black87,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
           ),
           const SizedBox(height: 2),
           Text(
             widget.order.maDh,
-            style: TextStyle(color: Colors.grey.shade600, fontSize: 13, fontWeight: FontWeight.normal),
+            style: TextStyle(
+              color: Colors.grey.shade600,
+              fontSize: 13,
+              fontWeight: FontWeight.normal,
+            ),
           ),
         ],
       ),
@@ -134,15 +155,27 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         children: [
           _buildStepItem('Xác nhận đơn', isDone: true, isCurrent: false),
           _buildStepLine(isDone: true),
-          _buildStepItem('Đang lấy\nhàng', isDone: widget.isDeliveryPhase, isCurrent: !widget.isDeliveryPhase),
-          _buildStepLine(isDone: widget.isDeliveryPhase), 
-          _buildStepItem('Đang giao', isDone: false, isCurrent: widget.isDeliveryPhase),
+          _buildStepItem(
+            'Đang lấy\nhàng',
+            isDone: widget.isDeliveryPhase,
+            isCurrent: !widget.isDeliveryPhase,
+          ),
+          _buildStepLine(isDone: widget.isDeliveryPhase),
+          _buildStepItem(
+            'Đang giao',
+            isDone: false,
+            isCurrent: widget.isDeliveryPhase,
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildStepItem(String title, {required bool isDone, required bool isCurrent}) {
+  Widget _buildStepItem(
+    String title, {
+    required bool isDone,
+    required bool isCurrent,
+  }) {
     Color iconColor;
     if (isDone) {
       iconColor = _successGreen;
@@ -169,8 +202,17 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             child: isDone
                 ? const Icon(Icons.check, size: 18, color: Colors.white)
                 : (isCurrent
-                    ? Center(child: Container(width: 10, height: 10, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle)))
-                    : null),
+                      ? Center(
+                          child: Container(
+                            width: 10,
+                            height: 10,
+                            decoration: const BoxDecoration(
+                              color: Colors.white,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        )
+                      : null),
           ),
           const SizedBox(height: 8),
           Text(
@@ -179,7 +221,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             style: TextStyle(
               fontSize: 12,
               fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
-              color: isCurrent ? _primaryRed : (isDone ? Colors.black87 : Colors.grey.shade500),
+              color: isCurrent
+                  ? _primaryRed
+                  : (isDone ? Colors.black87 : Colors.grey.shade500),
             ),
           ),
         ],
@@ -207,7 +251,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               child: _gpsError != null
                   ? Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                      child: Text(_gpsError!, textAlign: TextAlign.center, style: TextStyle(color: Colors.grey.shade700)),
+                      child: Text(
+                        _gpsError!,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.grey.shade700),
+                      ),
                     )
                   : const CircularProgressIndicator(),
             )
@@ -217,7 +265,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 initialCenter: _currentLatLng!,
                 initialZoom: 15,
                 // Vô hiệu hóa thao tác kéo/zoom để khung cuộn chính của trang hoạt động mượt mà
-                interactionOptions: const InteractionOptions(flags: InteractiveFlag.none),
+                interactionOptions: const InteractionOptions(
+                  flags: InteractiveFlag.none,
+                ),
               ),
               children: [
                 TileLayer(
@@ -235,9 +285,18 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           color: _primaryRed,
                           shape: BoxShape.circle,
                           border: Border.all(color: Colors.white, width: 3),
-                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 6)],
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.3),
+                              blurRadius: 6,
+                            ),
+                          ],
                         ),
-                        child: const Icon(Icons.two_wheeler, color: Colors.white, size: 22),
+                        child: const Icon(
+                          Icons.two_wheeler,
+                          color: Colors.white,
+                          size: 22,
+                        ),
                       ),
                     ),
                   ],
@@ -250,34 +309,64 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   Widget _buildPickupAddressCard() {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.grey.shade200)),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('ĐỊA CHỈ LẤY HÀNG', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey.shade600)),
+          Text(
+            'ĐỊA CHỈ LẤY HÀNG',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey.shade600,
+            ),
+          ),
           const SizedBox(height: 8),
-          Text(widget.order.diaChiLay, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          Text(
+            widget.order.diaChiLay,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 16),
           Row(
             children: [
               Expanded(
                 child: OutlinedButton.icon(
                   onPressed: () {},
-                  icon: const Icon(Icons.directions, color: Colors.black87, size: 20),
-                  label: const Text('Chỉ đường', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold)),
+                  icon: const Icon(
+                    Icons.directions,
+                    color: Colors.black87,
+                    size: 20,
+                  ),
+                  label: const Text(
+                    'Chỉ đường',
+                    style: TextStyle(
+                      color: Colors.black87,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                     side: BorderSide(color: Colors.grey.shade300),
                   ),
                 ),
               ),
               const SizedBox(width: 12),
               Container(
-                decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(8),
+                ),
                 child: IconButton(
                   icon: const Icon(Icons.phone_outlined, color: Colors.black87),
-                  onPressed: () => CallUtils.call(context, widget.order.sdtNguoiGui),
+                  onPressed: () =>
+                      CallUtils.call(context, widget.order.sdtNguoiGui),
                 ),
               ),
             ],
@@ -290,19 +379,40 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   Widget _buildPackageInfoCard() {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.grey.shade200)),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('THÔNG TIN GÓI HÀNG', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey.shade600)),
+          Text(
+            'THÔNG TIN GÓI HÀNG',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey.shade600,
+            ),
+          ),
           const SizedBox(height: 16),
           _buildInfoRow('Khối lượng (kg):', '${widget.order.khoiLuong}'),
           const SizedBox(height: 16),
-          _buildInfoRow('Kích thước (D x R x C):', widget.order.kichThuoc ?? 'Chưa cập nhật'),
+          _buildInfoRow(
+            'Kích thước (D x R x C):',
+            widget.order.kichThuoc ?? 'Chưa cập nhật',
+          ),
           const SizedBox(height: 16),
-          _buildInfoRow('Số tiền thu hộ COD (VNĐ):', widget.order.tienCod.toStringAsFixed(0), valueColor: Colors.orange.shade700),
+          _buildInfoRow(
+            'Số tiền thu hộ COD (VNĐ):',
+            widget.order.tienCod.toStringAsFixed(0),
+            valueColor: Colors.orange.shade700,
+          ),
           const SizedBox(height: 16),
-          _buildInfoRow('Phí giao hàng (VNĐ):', widget.order.phiGiaoHang.toStringAsFixed(0)),
+          _buildInfoRow(
+            'Phí giao hàng (VNĐ):',
+            widget.order.phiGiaoHang.toStringAsFixed(0),
+          ),
         ],
       ),
     );
@@ -312,8 +422,18 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: TextStyle(fontSize: 14, color: Colors.grey.shade700)),
-        Text(value, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: valueColor ?? Colors.black87)),
+        Text(
+          label,
+          style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
+        ),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+            color: valueColor ?? Colors.black87,
+          ),
+        ),
       ],
     );
   }
@@ -321,25 +441,47 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   Widget _buildDropoffCard() {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.grey.shade200)),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(10),
-            decoration: const BoxDecoration(color: Color(0xFFF5EBE9), shape: BoxShape.circle),
-            child: Icon(Icons.location_on, color: Colors.grey.shade600, size: 20),
+            decoration: const BoxDecoration(
+              color: Color(0xFFF5EBE9),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.location_on,
+              color: Colors.grey.shade600,
+              size: 20,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('GIAO ĐẾN', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey.shade600)),
+                Text(
+                  'GIAO ĐẾN',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey.shade600,
+                  ),
+                ),
                 const SizedBox(height: 4),
                 Text(
                   widget.order.diaChiGiao,
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
@@ -353,7 +495,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   Widget _buildBottomButton(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: Colors.grey.shade200))),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(top: BorderSide(color: Colors.grey.shade200)),
+      ),
       child: SafeArea(
         child: SizedBox(
           width: double.infinity,
@@ -362,11 +507,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             onPressed: () async {
               final success = await Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => CameraProofScreen(
-                  isDeliveryPhase: widget.isDeliveryPhase,
-                  maDh: widget.order.maDh,
-                  phoneNumber: widget.isDeliveryPhase ? widget.order.sdtNguoiNhan : widget.order.sdtNguoiGui,
-                )),
+                MaterialPageRoute(
+                  builder: (context) => CameraProofScreen(
+                    isDeliveryPhase: widget.isDeliveryPhase,
+                    maDh: widget.order.maDh,
+                    phoneNumber: widget.isDeliveryPhase
+                        ? widget.order.sdtNguoiNhan
+                        : widget.order.sdtNguoiGui,
+                    codAmount: widget.order.tienCod,
+                  ),
+                ),
               );
 
               if (success == true) {
@@ -375,14 +525,27 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 }
               }
             },
-            icon: const Icon(Icons.inventory_2_outlined, color: Colors.white, size: 20),
+            icon: const Icon(
+              Icons.inventory_2_outlined,
+              color: Colors.white,
+              size: 20,
+            ),
             label: Text(
-              widget.isDeliveryPhase ? 'Đã giao hàng thành công' : 'Đã lấy hàng — Bắt đầu giao',
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15, letterSpacing: 0.5),
+              widget.isDeliveryPhase
+                  ? 'Đã giao hàng thành công'
+                  : 'Đã lấy hàng — Bắt đầu giao',
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 15,
+                letterSpacing: 0.5,
+              ),
             ),
             style: ElevatedButton.styleFrom(
               backgroundColor: _primaryRed,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
               elevation: 0,
             ),
           ),

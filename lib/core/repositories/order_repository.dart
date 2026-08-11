@@ -149,11 +149,30 @@ class OrderRepository {
     }
   }
 
+  // SHIPPER TRẢ ĐƠN VỀ ĐIỀU PHỐI TRƯỚC KHI LẤY HÀNG.
+  // Không dùng DaHuy. Backend sẽ clear MaSp, đưa về ChoXacNhan
+  // và tự Auto Dispatch sang Shipper khác.
+  Future<void> returnOrderToDispatch({
+    required String maDonHang,
+    required String maShipper,
+    String? lyDo,
+  }) async {
+    try {
+      await _apiService.post('/api/DonHang/shipper-tra-don-dieu-phoi', {
+        'maDonHang': maDonHang,
+        'maShipper': maShipper,
+        'lyDo': lyDo,
+      });
+    } catch (e) {
+      throw Exception(e.toString().replaceAll('Exception: ', ''));
+    }
+  }
+
   // UPLOAD MINH CHỨNG GIAO/LẤY HÀNG (ảnh + OTP hoặc chữ ký)
   Future<bool> uploadDeliveryProof({
     required String maDonHang,
-    required String hinhAnhUrl,
-    required String chuKyOtp,
+    String? hinhAnhUrl,
+    String? chuKyOtp,
   }) async {
     try {
       final body = {

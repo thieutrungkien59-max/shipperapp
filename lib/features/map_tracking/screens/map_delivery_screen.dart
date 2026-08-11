@@ -1,31 +1,33 @@
-import 'package:flutter/material.dart';
-import 'package:flutter/gestures.dart';
 import 'dart:async';
-import 'package:shared_preferences/shared_preferences.dart';
+
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
-import '../../orders/screens/order_detail_screen.dart';
-import '../../orders/screens/delivery_failure_screen.dart';
-import '../../order_proof/screens/camera_proof_screen.dart';
-import 'full_map_screen.dart';
-import '../../../models/don_hang_model.dart';
-import '../../../services/api_service.dart';
-import '../../../services/location_service.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../../../core/repositories/order_repository.dart';
 import '../../../core/repositories/shipper_repository.dart';
 import '../../../core/utils/call_utils.dart';
 import '../../../core/utils/route_simulator.dart';
+import '../../../models/don_hang_model.dart';
+import '../../../services/api_service.dart';
+import '../../../services/location_service.dart';
+import '../../order_proof/screens/camera_proof_screen.dart';
+import '../../orders/screens/delivery_failure_screen.dart';
+import '../../orders/screens/order_detail_screen.dart';
+import 'full_map_screen.dart';
 
 // Bật quyền cho chuột máy tính có thể vuốt (drag) như ngón tay
 class _MouseDragScrollBehavior extends MaterialScrollBehavior {
   @override
   Set<PointerDeviceKind> get dragDevices => {
-        PointerDeviceKind.touch,
-        PointerDeviceKind.mouse,
-        PointerDeviceKind.trackpad,
-        PointerDeviceKind.stylus,
-      };
+    PointerDeviceKind.touch,
+    PointerDeviceKind.mouse,
+    PointerDeviceKind.trackpad,
+    PointerDeviceKind.stylus,
+  };
 }
 
 class MapDeliveryScreen extends StatefulWidget {
@@ -41,12 +43,12 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
   final Color _primaryRed = const Color(0xFFE51D35);
 
   bool _isArrived = false;
-  bool _isDeliveryPhase = false; 
+  bool _isDeliveryPhase = false;
 
   bool _isLoading = true;
   String? _loadError;
   DonHangModel? _order;
-  bool _isCancelling = false;
+  bool _isReturningOrder = false;
   bool _isUpdatingStatus = false;
 
   late final OrderRepository _orderRepository;
@@ -63,14 +65,20 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
   // - Pha "Giao hàng": đường từ vị trí hiện tại của shipper -> điểm giao hàng
   // Xem chi tiết cách sinh trong RouteSimulator — đây là dữ liệu MÔ PHỎNG,
   // không phải toạ độ thật, vì backend hiện chỉ trả địa chỉ dạng text.
-  FixedRoutePoints? _routePoints; // Toạ độ cố định 2 điểm lấy/giao hàng của đơn (chỉ dùng khi phải mô phỏng)
-  SimulatedRoute? _simulatedRoute; // Đường đi hiện đang hiển thị (ứng với pha hiện tại)
-  bool? _simulatedRouteIsDeliveryPhase; // Route hiện tại đang vẽ cho pha nào — để biết khi nào cần vẽ lại
-  bool _isRouteSimulated = true; // true = đang hiển thị dữ liệu MÔ PHỎNG, false = tuyến đường THẬT từ OSRM
-  bool _isLoadingRoute = false; // Đang gọi API tính tuyến đường thật, tránh gọi trùng
+  FixedRoutePoints?
+  _routePoints; // Toạ độ cố định 2 điểm lấy/giao hàng của đơn (chỉ dùng khi phải mô phỏng)
+  SimulatedRoute?
+  _simulatedRoute; // Đường đi hiện đang hiển thị (ứng với pha hiện tại)
+  bool?
+  _simulatedRouteIsDeliveryPhase; // Route hiện tại đang vẽ cho pha nào — để biết khi nào cần vẽ lại
+  bool _isRouteSimulated =
+      true; // true = đang hiển thị dữ liệu MÔ PHỎNG, false = tuyến đường THẬT từ OSRM
+  bool _isLoadingRoute =
+      false; // Đang gọi API tính tuyến đường thật, tránh gọi trùng
 
-  final DraggableScrollableController _sheetController = DraggableScrollableController();
-  
+  final DraggableScrollableController _sheetController =
+      DraggableScrollableController();
+
   // Cho phép hạ mức thấp nhất xuống 0.06 (6%) để giấu thẻ trắng, hiện full bản đồ
   static const List<double> _sheetSnapSizes = [0.06, 0.50, 0.85];
   final ValueNotifier<double> _sheetExtent = ValueNotifier(0.50);
@@ -78,13 +86,57 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
   DateTime? _lastGpsSentAt;
   static const Duration _minGpsSendInterval = Duration(seconds: 10);
 
+  String get _arrivalStorageKey {
+    final phase = _isDeliveryPhase ? 'delivery' : 'pickup';
+    return 'shipper_arrived_${widget.maDh}_$phase';
+  }
+
+  Future<void> _restoreArrivedState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getBool(_arrivalStorageKey) ?? false;
+
+      if (!mounted) return;
+
+      setState(() {
+        _isArrived = saved;
+      });
+    } catch (e) {
+      debugPrint('[ArrivalState] Không restore được trạng thái đã đến nơi: $e');
+    }
+  }
+
+  Future<void> _persistArrivedState(bool value) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      if (value) {
+        await prefs.setBool(_arrivalStorageKey, true);
+      } else {
+        await prefs.remove(_arrivalStorageKey);
+      }
+    } catch (e) {
+      debugPrint('[ArrivalState] Không lưu được trạng thái đã đến nơi: $e');
+    }
+  }
+
+  Future<void> _clearAllArrivalStatesForOrder() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('shipper_arrived_${widget.maDh}_pickup');
+      await prefs.remove('shipper_arrived_${widget.maDh}_delivery');
+    } catch (e) {
+      debugPrint('[ArrivalState] Không xóa được trạng thái arrival: $e');
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     _orderRepository = OrderRepository(ApiServices());
     _shipperRepository = ShipperRepository(ApiServices());
     _locationService = LocationService();
-    
+
     _sheetController.addListener(() {
       if (_sheetController.isAttached) {
         _sheetExtent.value = _sheetController.size;
@@ -100,12 +152,17 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
       final initialPosition = await _locationService.getCurrentPosition();
       if (!mounted) return;
       setState(() {
-        _currentLatLng = LatLng(initialPosition.latitude, initialPosition.longitude);
+        _currentLatLng = LatLng(
+          initialPosition.latitude,
+          initialPosition.longitude,
+        );
       });
       _mapController.move(_currentLatLng!, 16);
       _sendGpsUpdate(initialPosition, force: true);
 
-      _positionSubscription = _locationService.watchPosition().listen((position) {
+      _positionSubscription = _locationService.watchPosition().listen((
+        position,
+      ) {
         if (!mounted) return;
         final newLatLng = LatLng(position.latitude, position.longitude);
         setState(() => _currentLatLng = newLatLng);
@@ -127,8 +184,10 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
 
   Future<void> _sendGpsUpdate(Position position, {bool force = false}) async {
     final now = DateTime.now();
-    if (!force && _lastGpsSentAt != null && now.difference(_lastGpsSentAt!) < _minGpsSendInterval) {
-      return; 
+    if (!force &&
+        _lastGpsSentAt != null &&
+        now.difference(_lastGpsSentAt!) < _minGpsSendInterval) {
+      return;
     }
     _lastGpsSentAt = now;
 
@@ -169,6 +228,10 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
         _isDeliveryPhase = order.trangThai == 'DangGiao';
         _isLoading = false;
       });
+
+      // Backend hiện chưa có trạng thái "đã đến nơi", nên phục hồi bước
+      // trung gian này từ local theo đúng mã đơn + đúng pha lấy/giao.
+      await _restoreArrivedState();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -191,10 +254,17 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
   // [force] = true khi Shipper chủ động bấm nút "Chỉ đường": bỏ qua route đã có, vẽ lại từ đầu.
   Future<void> _maybeBuildSimulatedRoute({bool force = false}) async {
     if (_order == null || _currentLatLng == null) {
-      debugPrint('[Route] Bỏ qua: order=${_order != null}, currentLatLng=${_currentLatLng != null}');
+      debugPrint(
+        '[Route] Bỏ qua: order=${_order != null}, currentLatLng=${_currentLatLng != null}',
+      );
       if (force && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Chưa xác định được vị trí GPS hiện tại, thử lại sau vài giây.'), backgroundColor: Colors.red),
+          const SnackBar(
+            content: Text(
+              'Chưa xác định được vị trí GPS hiện tại, thử lại sau vài giây.',
+            ),
+            backgroundColor: Colors.red,
+          ),
         );
       }
       return;
@@ -202,7 +272,10 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
 
     // Đã có route đúng cho pha hiện tại rồi, hoặc đang có 1 request chạy dở -> không làm gì thêm
     // (trừ khi Shipper chủ động bấm "Chỉ đường" -> luôn cho vẽ lại)
-    if (!force && ((_simulatedRoute != null && _simulatedRouteIsDeliveryPhase == _isDeliveryPhase) || _isLoadingRoute)) {
+    if (!force &&
+        ((_simulatedRoute != null &&
+                _simulatedRouteIsDeliveryPhase == _isDeliveryPhase) ||
+            _isLoadingRoute)) {
       return;
     }
     if (_isLoadingRoute) return; // Tránh bấm dồn dập khi đang có request chạy
@@ -213,8 +286,12 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
     try {
       final order = _order!;
       final LatLng? realTarget = _isDeliveryPhase
-          ? (order.viDoGiao != null && order.kinhDoGiao != null ? LatLng(order.viDoGiao!, order.kinhDoGiao!) : null)
-          : (order.viDoLay != null && order.kinhDoLay != null ? LatLng(order.viDoLay!, order.kinhDoLay!) : null);
+          ? (order.viDoGiao != null && order.kinhDoGiao != null
+                ? LatLng(order.viDoGiao!, order.kinhDoGiao!)
+                : null)
+          : (order.viDoLay != null && order.kinhDoLay != null
+                ? LatLng(order.viDoLay!, order.kinhDoLay!)
+                : null);
 
       if (realTarget != null) {
         setState(() => _isLoadingRoute = true);
@@ -228,7 +305,9 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
             _simulatedRoute = SimulatedRoute(
               from: _currentLatLng!,
               to: realTarget,
-              routePoints: quote.routePoints.isNotEmpty ? quote.routePoints : [_currentLatLng!, realTarget],
+              routePoints: quote.routePoints.isNotEmpty
+                  ? quote.routePoints
+                  : [_currentLatLng!, realTarget],
               distanceKm: quote.distanceKm,
               etaMinutesOverride: quote.durationMinutes,
             );
@@ -236,11 +315,15 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
             _isRouteSimulated = false;
             _isLoadingRoute = false;
           });
-          debugPrint('[Route] Đã lấy tuyến đường THẬT: ${quote.distanceKm}km, ${quote.durationMinutes} phút');
+          debugPrint(
+            '[Route] Đã lấy tuyến đường THẬT: ${quote.distanceKm}km, ${quote.durationMinutes} phút',
+          );
           if (force) _fitMapToRoute();
           return;
         } catch (e) {
-          debugPrint('[Route] Lỗi gọi API tuyến đường thật, dùng mô phỏng thay thế: $e');
+          debugPrint(
+            '[Route] Lỗi gọi API tuyến đường thật, dùng mô phỏng thay thế: $e',
+          );
           if (mounted) setState(() => _isLoadingRoute = false);
           // Rơi xuống dùng mô phỏng bên dưới
         }
@@ -250,7 +333,9 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
       final seed = '${order.maDh}_${order.diaChiLay}_${order.diaChiGiao}';
       _routePoints ??= RouteSimulator.resolveFixedPoints(seed);
 
-      final target = _isDeliveryPhase ? _routePoints!.dropoffPoint : _routePoints!.pickupPoint;
+      final target = _isDeliveryPhase
+          ? _routePoints!.dropoffPoint
+          : _routePoints!.pickupPoint;
       final newRoute = RouteSimulator.buildPath(
         from: _currentLatLng!,
         to: target,
@@ -263,7 +348,9 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
         _simulatedRouteIsDeliveryPhase = _isDeliveryPhase;
         _isRouteSimulated = true;
       });
-      debugPrint('[Route] Đã vẽ route MÔ PHỎNG: ${newRoute.distanceKm.toStringAsFixed(2)}km, pha=${_isDeliveryPhase ? "giao" : "lay"}');
+      debugPrint(
+        '[Route] Đã vẽ route MÔ PHỎNG: ${newRoute.distanceKm.toStringAsFixed(2)}km, pha=${_isDeliveryPhase ? "giao" : "lay"}',
+      );
       if (force) _fitMapToRoute();
     } catch (e, st) {
       // KHÔNG để lỗi bị "nuốt" âm thầm — log ra console VÀ hiện SnackBar để thấy ngay
@@ -273,13 +360,19 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
       if (mounted) {
         setState(() => _isLoadingRoute = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Lỗi tính tuyến đường: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('Lỗi tính tuyến đường: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
   }
 
-  Future<bool> _updateOrderStatus(String trangThaiMoi, {String ghiChu = ''}) async {
+  Future<bool> _updateOrderStatus(
+    String trangThaiMoi, {
+    String ghiChu = '',
+  }) async {
     setState(() => _isUpdatingStatus = true);
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -287,13 +380,20 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
       if (maSp == null || maSp.isEmpty) {
         throw Exception('Không tìm thấy mã Shipper, vui lòng đăng nhập lại.');
       }
-      await _orderRepository.updateOrderStatus(widget.maDh, maSp, trangThaiMoi, ghiChu: ghiChu);
+      await _orderRepository.updateOrderStatus(
+        widget.maDh,
+        maSp,
+        trangThaiMoi,
+        ghiChu: ghiChu,
+      );
       return true;
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Lỗi cập nhật đơn: ${e.toString().replaceAll('Exception: ', '')}'),
+            content: Text(
+              'Lỗi cập nhật đơn: ${e.toString().replaceAll('Exception: ', '')}',
+            ),
             backgroundColor: Colors.red,
           ),
         );
@@ -304,17 +404,26 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
     }
   }
 
-  Future<void> _handleCancelOrder() async {
+  Future<void> _handleReturnToDispatch() async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Huỷ đơn hàng?'),
-        content: const Text('Bạn chắc chắn muốn huỷ đơn này? Hành động này không thể hoàn tác.'),
+        title: const Text('Trả đơn về điều phối?'),
+        content: const Text(
+          'Đơn hàng sẽ không bị hủy. Hệ thống sẽ gỡ đơn khỏi bạn '
+          'và tìm tài xế khác để tiếp tục giao.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Không')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Tiếp tục đơn'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: Text('Huỷ đơn', style: TextStyle(color: _primaryRed)),
+            child: Text(
+              'Trả về điều phối',
+              style: TextStyle(color: _primaryRed),
+            ),
           ),
         ],
       ),
@@ -322,13 +431,50 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
 
     if (confirm != true) return;
 
-    setState(() => _isCancelling = true);
-    final success = await _updateOrderStatus('DaHuy', ghiChu: 'Shipper huỷ đơn trước khi lấy hàng');
-    if (!mounted) return;
-    setState(() => _isCancelling = false);
+    setState(() => _isReturningOrder = true);
 
-    if (success) {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final maSp = prefs.getString('maSp');
+
+      if (maSp == null || maSp.isEmpty) {
+        throw Exception('Không tìm thấy mã Shipper, vui lòng đăng nhập lại.');
+      }
+
+      await _orderRepository.returnOrderToDispatch(
+        maDonHang: widget.maDh,
+        maShipper: maSp,
+        lyDo: 'Shipper không thể tiếp tục đơn trước khi lấy hàng.',
+      );
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Đã trả đơn về điều phối. Hệ thống sẽ tìm tài xế khác.',
+          ),
+          backgroundColor: Colors.green,
+        ),
+      );
+
       Navigator.of(context).popUntil((route) => route.isFirst);
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Không thể trả đơn: '
+            '${e.toString().replaceAll('Exception: ', '')}',
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isReturningOrder = false);
+      }
     }
   }
 
@@ -350,11 +496,19 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
         _order = updatedOrder;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Đã ghi nhận thất bại lần ${updatedOrder.soLanGiaoThatBai}. Tiếp tục giao hàng.')),
+        SnackBar(
+          content: Text(
+            'Đã ghi nhận thất bại lần ${updatedOrder.soLanGiaoThatBai}. Tiếp tục giao hàng.',
+          ),
+        ),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Đơn đã được cập nhật trạng thái: "${_statusLabel(updatedOrder.trangThai)}".')),
+        SnackBar(
+          content: Text(
+            'Đơn đã được cập nhật trạng thái: "${_statusLabel(updatedOrder.trangThai)}".',
+          ),
+        ),
       );
       Navigator.of(context).popUntil((route) => route.isFirst);
     }
@@ -362,8 +516,15 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
 
   Future<void> _handleProofSuccess() async {
     if (!_isDeliveryPhase) {
-      final success = await _updateOrderStatus('DangGiao', ghiChu: 'Shipper đã lấy hàng');
+      final success = await _updateOrderStatus(
+        'DangGiao',
+        ghiChu: 'Shipper đã lấy hàng',
+      );
       if (!mounted || !success) return;
+
+      // Pha lấy hàng đã hoàn tất, xóa marker "đã đến nơi lấy hàng".
+      await _persistArrivedState(false);
+
       setState(() {
         _isDeliveryPhase = true;
         _isArrived = false;
@@ -373,11 +534,19 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
         _simulatedRouteIsDeliveryPhase = null;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Lấy hàng thành công! Bấm "Chỉ đường" để đi giao.')),
+        const SnackBar(
+          content: Text('Lấy hàng thành công! Bấm "Chỉ đường" để đi giao.'),
+        ),
       );
     } else {
-      final success = await _updateOrderStatus('DaGiao', ghiChu: 'Shipper đã giao hàng thành công');
+      final success = await _updateOrderStatus(
+        'DaGiao',
+        ghiChu: 'Shipper đã giao hàng thành công',
+      );
       if (!mounted || !success) return;
+
+      await _clearAllArrivalStatesForOrder();
+
       Navigator.of(context).popUntil((route) => route.isFirst);
     }
   }
@@ -411,40 +580,40 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _loadError != null
-              ? _buildErrorState()
-              : Stack(
-                  children: [
-                    _buildMapPlaceholder(),
-                    
-                    ValueListenableBuilder<double>(
-                      valueListenable: _sheetExtent,
-                      builder: (context, extent, child) {
-                        final screenHeight = MediaQuery.of(context).size.height;
-                        // Giới hạn cappedExtent ở mức 0.55 để các nút không bao giờ bị đẩy lọt ra khỏi màn hình trên cùng
-                        final cappedExtent = extent > 0.55 ? 0.55 : extent;
-                        final bottomPosition = (screenHeight * cappedExtent) + 16;
-                        
-                        return Positioned(
-                          bottom: bottomPosition,
-                          right: 16,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              _buildFullMapButton(),
-                              const SizedBox(height: 12),
-                              _buildRecenterButton(),
-                              const SizedBox(height: 12),
-                              _buildDistanceBadge(),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
+          ? _buildErrorState()
+          : Stack(
+              children: [
+                _buildMapPlaceholder(),
 
-                    _buildDraggableBottomSheet(context),
-                  ],
+                ValueListenableBuilder<double>(
+                  valueListenable: _sheetExtent,
+                  builder: (context, extent, child) {
+                    final screenHeight = MediaQuery.of(context).size.height;
+                    // Giới hạn cappedExtent ở mức 0.55 để các nút không bao giờ bị đẩy lọt ra khỏi màn hình trên cùng
+                    final cappedExtent = extent > 0.55 ? 0.55 : extent;
+                    final bottomPosition = (screenHeight * cappedExtent) + 16;
+
+                    return Positioned(
+                      bottom: bottomPosition,
+                      right: 16,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _buildFullMapButton(),
+                          const SizedBox(height: 12),
+                          _buildRecenterButton(),
+                          const SizedBox(height: 12),
+                          _buildDistanceBadge(),
+                        ],
+                      ),
+                    );
+                  },
                 ),
+
+                _buildDraggableBottomSheet(context),
+              ],
+            ),
     );
   }
 
@@ -455,7 +624,10 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
     try {
       final bounds = LatLngBounds.fromPoints(route.routePoints);
       _mapController.fitCamera(
-        CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.fromLTRB(48, 80, 48, 260)),
+        CameraFit.bounds(
+          bounds: bounds,
+          padding: const EdgeInsets.fromLTRB(48, 80, 48, 260),
+        ),
       );
     } catch (e) {
       debugPrint('[Route] Không thể fit camera theo tuyến đường: $e');
@@ -464,7 +636,10 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
 
   void _recenterToCurrentLocation() {
     if (_currentLatLng == null) return;
-    _mapController.move(_currentLatLng!, _mapController.camera.zoom < 15 ? 16 : _mapController.camera.zoom);
+    _mapController.move(
+      _currentLatLng!,
+      _mapController.camera.zoom < 15 ? 16 : _mapController.camera.zoom,
+    );
   }
 
   Widget _buildRecenterButton() {
@@ -496,7 +671,10 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => FullMapScreen(order: _order!, isDeliveryPhase: _isDeliveryPhase),
+              builder: (context) => FullMapScreen(
+                order: _order!,
+                isDeliveryPhase: _isDeliveryPhase,
+              ),
             ),
           );
         },
@@ -515,7 +693,8 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
       child: DraggableScrollableSheet(
         controller: _sheetController,
         initialChildSize: 0.50, // Mặc định hiển thị vừa đủ thông tin ở mức 50%
-        minChildSize: 0.06,     // Cho phép vuốt mất luôn thẻ trắng (chỉ chừa thanh xám 6%)
+        minChildSize:
+            0.06, // Cho phép vuốt mất luôn thẻ trắng (chỉ chừa thanh xám 6%)
         maxChildSize: 0.85,
         snap: true,
         snapSizes: _sheetSnapSizes,
@@ -535,12 +714,18 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
           children: [
             const Icon(Icons.error_outline, color: Colors.red, size: 40),
             const SizedBox(height: 12),
-            Text('Không tải được đơn hàng:\n$_loadError', textAlign: TextAlign.center),
+            Text(
+              'Không tải được đơn hàng:\n$_loadError',
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: 16),
             ElevatedButton(
               onPressed: _loadOrder,
               style: ElevatedButton.styleFrom(backgroundColor: _primaryRed),
-              child: const Text('Thử lại', style: TextStyle(color: Colors.white)),
+              child: const Text(
+                'Thử lại',
+                style: TextStyle(color: Colors.white),
+              ),
             ),
           ],
         ),
@@ -556,20 +741,41 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
         icon: const Icon(Icons.arrow_back, color: Colors.black87),
         onPressed: () => Navigator.pop(context),
       ),
-      title: Text(widget.maDh, style: const TextStyle(color: Colors.black87, fontSize: 16, fontWeight: FontWeight.bold)),
+      title: Text(
+        widget.maDh,
+        style: const TextStyle(
+          color: Colors.black87,
+          fontSize: 16,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
       actions: [
         Center(
           child: Container(
             margin: const EdgeInsets.only(right: 16),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(color: _primaryRed.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+            decoration: BoxDecoration(
+              color: _primaryRed.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
             child: Row(
               children: [
-                Container(width: 6, height: 6, decoration: BoxDecoration(color: _primaryRed, shape: BoxShape.circle)),
+                Container(
+                  width: 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: _primaryRed,
+                    shape: BoxShape.circle,
+                  ),
+                ),
                 const SizedBox(width: 4),
                 Text(
                   _isDeliveryPhase ? 'ĐANG GIAO' : 'LẤY HÀNG',
-                  style: TextStyle(color: _primaryRed, fontWeight: FontWeight.bold, fontSize: 11),
+                  style: TextStyle(
+                    color: _primaryRed,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 11,
+                  ),
                 ),
               ],
             ),
@@ -582,7 +788,8 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
   Widget _buildMapPlaceholder() {
     if (_currentLatLng == null && _gpsError == null) {
       return Container(
-        width: double.infinity, height: double.infinity,
+        width: double.infinity,
+        height: double.infinity,
         color: const Color(0xFFEAEAEA),
         child: const Center(child: CircularProgressIndicator()),
       );
@@ -590,7 +797,8 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
 
     if (_gpsError != null && _currentLatLng == null) {
       return Container(
-        width: double.infinity, height: double.infinity,
+        width: double.infinity,
+        height: double.infinity,
         color: const Color(0xFFEAEAEA),
         child: Center(
           child: Padding(
@@ -598,7 +806,11 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.location_off, color: Colors.redAccent, size: 40),
+                const Icon(
+                  Icons.location_off,
+                  color: Colors.redAccent,
+                  size: 40,
+                ),
                 const SizedBox(height: 12),
                 Text(_gpsError!, textAlign: TextAlign.center),
                 const SizedBox(height: 16),
@@ -608,7 +820,10 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
                     _startLocationTracking();
                   },
                   style: ElevatedButton.styleFrom(backgroundColor: _primaryRed),
-                  child: const Text('Thử lại', style: TextStyle(color: Colors.white)),
+                  child: const Text(
+                    'Thử lại',
+                    style: TextStyle(color: Colors.white),
+                  ),
                 ),
               ],
             ),
@@ -619,10 +834,7 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
 
     return FlutterMap(
       mapController: _mapController,
-      options: MapOptions(
-        initialCenter: _currentLatLng!,
-        initialZoom: 16,
-      ),
+      options: MapOptions(initialCenter: _currentLatLng!, initialZoom: 16),
       children: [
         TileLayer(
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -651,9 +863,18 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
                   color: _primaryRed,
                   shape: BoxShape.circle,
                   border: Border.all(color: Colors.white, width: 3),
-                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 6)],
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.3),
+                      blurRadius: 6,
+                    ),
+                  ],
                 ),
-                child: const Icon(Icons.two_wheeler, color: Colors.white, size: 22),
+                child: const Icon(
+                  Icons.two_wheeler,
+                  color: Colors.white,
+                  size: 22,
+                ),
               ),
             ),
             // Marker điểm đích của pha hiện tại: cam (cửa hàng) khi đang đi lấy hàng,
@@ -665,7 +886,9 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
                 height: 36,
                 child: _buildRoutePointMarker(
                   icon: _isDeliveryPhase ? Icons.location_on : Icons.storefront,
-                  color: _isDeliveryPhase ? _primaryRed : Colors.orange.shade700,
+                  color: _isDeliveryPhase
+                      ? _primaryRed
+                      : Colors.orange.shade700,
                 ),
               ),
           ],
@@ -674,13 +897,18 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
     );
   }
 
-  Widget _buildRoutePointMarker({required IconData icon, required Color color}) {
+  Widget _buildRoutePointMarker({
+    required IconData icon,
+    required Color color,
+  }) {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
         shape: BoxShape.circle,
         border: Border.all(color: color, width: 2),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 4)],
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 4),
+        ],
       ),
       child: Icon(icon, color: color, size: 18),
     );
@@ -691,37 +919,65 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
     final String label = _isLoadingRoute
         ? 'Đang tính tuyến đường...'
         : route == null
-            ? 'Bấm "Chỉ đường" để xem lộ trình'
-            : '${route.distanceKm.toStringAsFixed(1)} km · ~${route.etaMinutes} phút${_isRouteSimulated ? ' (mô phỏng)' : ''}';
+        ? 'Bấm "Chỉ đường" để xem lộ trình'
+        : '${route.distanceKm.toStringAsFixed(1)} km · ~${route.etaMinutes} phút${_isRouteSimulated ? ' (mô phỏng)' : ''}';
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.white, borderRadius: BorderRadius.circular(8),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 8, offset: const Offset(0, 4))],
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           _isLoadingRoute
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Icon(Icons.directions_car, color: Colors.black54, size: 20),
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(
+                  Icons.directions_car,
+                  color: Colors.black54,
+                  size: 20,
+                ),
           const SizedBox(width: 8),
-          Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+          Text(
+            label,
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildBottomSheet(BuildContext context, ScrollController scrollController) {
+  Widget _buildBottomSheet(
+    BuildContext context,
+    ScrollController scrollController,
+  ) {
     final order = _order!;
     final bool canCancel = !_isDeliveryPhase;
 
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-        color: Colors.white, borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -5))],
+        color: Colors.white,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, -5),
+          ),
+        ],
       ),
       child: Column(
         children: [
@@ -730,18 +986,21 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
             height: 36, // Vùng nhận thao tác vuốt
             child: ListView(
               controller: scrollController,
-              physics: const ClampingScrollPhysics(), // Ép nhận thao tác vuốt trượt thẻ
+              physics:
+                  const ClampingScrollPhysics(), // Ép nhận thao tác vuốt trượt thẻ
               padding: EdgeInsets.zero,
               children: [
                 Container(
                   height: 36,
-                  color: Colors.transparent, // Trong suốt để không bị lọt thao tác
+                  color:
+                      Colors.transparent, // Trong suốt để không bị lọt thao tác
                   child: Center(
                     child: Container(
-                      width: 40, height: 5,
+                      width: 40,
+                      height: 5,
                       decoration: BoxDecoration(
-                        color: Colors.grey.shade300, 
-                        borderRadius: BorderRadius.circular(4)
+                        color: Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(4),
                       ),
                     ),
                   ),
@@ -758,7 +1017,11 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
               children: [
                 Text(
                   _isDeliveryPhase ? 'GIAO ĐẾN' : 'ĐỊA CHỈ LẤY HÀNG',
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black54),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black54,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Row(
@@ -769,13 +1032,24 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            _isDeliveryPhase ? order.tenNguoiNhan : 'Điểm lấy hàng',
-                            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                            _isDeliveryPhase
+                                ? order.tenNguoiNhan
+                                : 'Điểm lấy hàng',
+                            style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            _isDeliveryPhase ? order.diaChiGiao : order.diaChiLay,
-                            style: TextStyle(fontSize: 13, color: Colors.grey.shade600, height: 1.4),
+                            _isDeliveryPhase
+                                ? order.diaChiGiao
+                                : order.diaChiLay,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.grey.shade600,
+                              height: 1.4,
+                            ),
                           ),
                         ],
                       ),
@@ -785,11 +1059,16 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
                       borderRadius: BorderRadius.circular(24),
                       onTap: () => CallUtils.call(
                         context,
-                        _isDeliveryPhase ? order.sdtNguoiNhan : order.sdtNguoiGui,
+                        _isDeliveryPhase
+                            ? order.sdtNguoiNhan
+                            : order.sdtNguoiGui,
                       ),
                       child: Container(
                         padding: const EdgeInsets.all(12),
-                        decoration: const BoxDecoration(color: Color(0xFFF9EFEB), shape: BoxShape.circle),
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFF9EFEB),
+                          shape: BoxShape.circle,
+                        ),
                         child: const Icon(Icons.phone, color: Colors.black87),
                       ),
                     ),
@@ -804,15 +1083,35 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
                           // Thu gọn thẻ trắng để lộ bản đồ, rồi vẽ lại tuyến đường (chủ động,
                           // bỏ qua route đã có nếu có) từ vị trí hiện tại -> điểm cần tới
                           if (_sheetController.isAttached) {
-                            _sheetController.animateTo(0.06, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+                            _sheetController.animateTo(
+                              0.06,
+                              duration: const Duration(milliseconds: 300),
+                              curve: Curves.easeOut,
+                            );
                           }
                           _maybeBuildSimulatedRoute(force: true);
                         },
-                        icon: const Icon(Icons.navigation_outlined, color: Colors.black87, size: 18),
-                        label: const Text('Chỉ đường', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 13)),
+                        icon: const Icon(
+                          Icons.navigation_outlined,
+                          color: Colors.black87,
+                          size: 18,
+                        ),
+                        label: const Text(
+                          'Chỉ đường',
+                          style: TextStyle(
+                            color: Colors.black87,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
                         style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 12,
+                            horizontal: 8,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
                           side: BorderSide(color: Colors.grey.shade300),
                         ),
                       ),
@@ -824,18 +1123,39 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
                           final success = await Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (context) => OrderDetailScreen(isDeliveryPhase: _isDeliveryPhase, order: order),
+                              builder: (context) => OrderDetailScreen(
+                                isDeliveryPhase: _isDeliveryPhase,
+                                order: order,
+                              ),
                             ),
                           );
                           if (success == true) {
                             await _handleProofSuccess();
                           }
                         },
-                        icon: const Icon(Icons.receipt_long_outlined, color: Colors.black87, size: 18),
-                        label: const Text('Chi tiết đơn', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
+                        icon: const Icon(
+                          Icons.receipt_long_outlined,
+                          color: Colors.black87,
+                          size: 18,
+                        ),
+                        label: const Text(
+                          'Chi tiết đơn',
+                          style: TextStyle(
+                            color: Colors.black87,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                         style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 12,
+                            horizontal: 8,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
                           side: BorderSide(color: Colors.grey.shade300),
                         ),
                       ),
@@ -845,7 +1165,10 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
                 if (_isDeliveryPhase && order.soLanGiaoThatBai > 0) ...[
                   const SizedBox(height: 12),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.red.shade50,
                       borderRadius: BorderRadius.circular(8),
@@ -853,11 +1176,19 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.error_outline, color: Colors.red.shade700, size: 18),
+                        Icon(
+                          Icons.error_outline,
+                          color: Colors.red.shade700,
+                          size: 18,
+                        ),
                         const SizedBox(width: 8),
                         Text(
                           'Đã giao thất bại ${order.soLanGiaoThatBai} lần',
-                          style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold, fontSize: 13),
+                          style: TextStyle(
+                            color: Colors.red.shade700,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
                         ),
                       ],
                     ),
@@ -866,18 +1197,29 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
                 const SizedBox(height: 16),
                 Container(
                   padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: const Color(0xFFFEF3E9), borderRadius: BorderRadius.circular(8)),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEF3E9),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.access_time, color: Colors.orange.shade700, size: 20),
+                      Icon(
+                        Icons.access_time,
+                        color: Colors.orange.shade700,
+                        size: 20,
+                      ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
                           _isDeliveryPhase
                               ? 'Có thể trễ hạn dự kiến do tình trạng giao thông. Vui lòng liên hệ người nhận nếu cần.'
-                              : 'Đơn hàng chỉ có thể huỷ trước khi bạn xác nhận đã lấy hàng.',
-                          style: TextStyle(color: Colors.orange.shade900, fontSize: 12, height: 1.4),
+                              : 'Nếu không thể tiếp tục, bạn chỉ có thể trả đơn về điều phối trước khi xác nhận đã lấy hàng.',
+                          style: TextStyle(
+                            color: Colors.orange.shade900,
+                            fontSize: 12,
+                            height: 1.4,
+                          ),
                         ),
                       ),
                     ],
@@ -894,7 +1236,13 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
                         ? null
                         : () async {
                             if (!_isArrived) {
-                              setState(() { _isArrived = true; });
+                              setState(() {
+                                _isArrived = true;
+                              });
+
+                              // Lưu thật trạng thái UI để Back ra/vào lại
+                              // vẫn tiếp tục đúng bước hiện tại.
+                              await _persistArrivedState(true);
                             } else {
                               final success = await Navigator.push(
                                 context,
@@ -902,7 +1250,10 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
                                   builder: (context) => CameraProofScreen(
                                     isDeliveryPhase: _isDeliveryPhase,
                                     maDh: widget.maDh,
-                                    phoneNumber: _isDeliveryPhase ? order.sdtNguoiNhan : order.sdtNguoiGui,
+                                    phoneNumber: _isDeliveryPhase
+                                        ? order.sdtNguoiNhan
+                                        : order.sdtNguoiGui,
+                                    codAmount: order.tienCod,
                                   ),
                                 ),
                               );
@@ -913,41 +1264,69 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
                           },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: _primaryRed,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                       elevation: 0,
                     ),
                     child: _isUpdatingStatus
                         ? const SizedBox(
-                            height: 22, width: 22,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            height: 22,
+                            width: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
                           )
                         : Text(
                             _isArrived
-                                ? (_isDeliveryPhase ? 'XÁC NHẬN ĐÃ GIAO HÀNG' : 'XÁC NHẬN ĐÃ LẤY HÀNG')
+                                ? (_isDeliveryPhase
+                                      ? 'XÁC NHẬN ĐÃ GIAO HÀNG'
+                                      : 'XÁC NHẬN ĐÃ LẤY HÀNG')
                                 : 'XÁC NHẬN ĐÃ ĐẾN NƠI',
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14, letterSpacing: 0.5),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                              letterSpacing: 0.5,
+                            ),
                           ),
                   ),
                 ),
 
-                // NÚT HUỶ ĐƠN
+                // NÚT TRẢ ĐƠN VỀ ĐIỀU PHỐI - KHÔNG HỦY ĐƠN CỦA KHÁCH
                 if (canCancel) ...[
                   const SizedBox(height: 12),
                   SizedBox(
                     width: double.infinity,
                     height: 48,
                     child: OutlinedButton(
-                      onPressed: _isCancelling ? null : _handleCancelOrder,
+                      onPressed: _isReturningOrder
+                          ? null
+                          : _handleReturnToDispatch,
                       style: OutlinedButton.styleFrom(
                         side: BorderSide(color: _primaryRed),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
-                      child: _isCancelling
+                      child: _isReturningOrder
                           ? SizedBox(
-                              height: 20, width: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: _primaryRed),
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: _primaryRed,
+                              ),
                             )
-                          : Text('Huỷ đơn hàng', style: TextStyle(color: _primaryRed, fontWeight: FontWeight.bold, fontSize: 14)),
+                          : Text(
+                              'Trả đơn về điều phối',
+                              style: TextStyle(
+                                color: _primaryRed,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                            ),
                     ),
                   ),
                 ],
@@ -962,9 +1341,18 @@ class _MapDeliveryScreenState extends State<MapDeliveryScreen> {
                       onPressed: _handleReportFailure,
                       style: OutlinedButton.styleFrom(
                         side: BorderSide(color: Colors.grey.shade400),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
-                      child: Text('Báo giao thất bại', style: TextStyle(color: Colors.grey.shade700, fontWeight: FontWeight.bold, fontSize: 14)),
+                      child: Text(
+                        'Báo giao thất bại',
+                        style: TextStyle(
+                          color: Colors.grey.shade700,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
                     ),
                   ),
                 ],

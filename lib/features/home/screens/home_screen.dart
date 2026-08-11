@@ -45,6 +45,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _isOnline = false;
   bool _isUpdatingStatus = false;
 
+  // Thống kê Home lấy từ backend.
+  int _todayOrderCount = 0;
+  double _todayDistanceKm = 0;
+  double _codHolding = 0;
+  bool _isLoadingHomeStats = false;
+
   // Biến để ghi nhớ các đơn hàng đã hiện popup (tránh hiện spam liên tục)
   final Set<String> _notifiedOrderIds = {};
 
@@ -169,6 +175,65 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _loadHomeStats() async {
+    if (_isLoadingHomeStats) return;
+
+    _isLoadingHomeStats = true;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final maSp = prefs.getString('maSp');
+
+      if (maSp == null || maSp.isEmpty) return;
+
+      final response = await _apiService.get(
+        '/api/DonHang/shipper/$maSp/thong-ke',
+      );
+
+      final homNay = response['homNay'] ?? {};
+
+      if (!mounted) return;
+
+      setState(() {
+        _todayOrderCount = _toInt(homNay['donHomNay']);
+        _todayDistanceKm = _toDouble(homNay['quangDuongHomNayKm']);
+        _codHolding = _toDouble(homNay['codDangGiu']);
+      });
+    } catch (e) {
+      // Stats lỗi không làm mất Home/order polling.
+      debugPrint('Lỗi lấy thống kê Home: $e');
+    } finally {
+      _isLoadingHomeStats = false;
+    }
+  }
+
+  int _toInt(dynamic value) {
+    if (value is num) return value.toInt();
+    return int.tryParse('${value ?? 0}') ?? 0;
+  }
+
+  double _toDouble(dynamic value) {
+    if (value is num) return value.toDouble();
+    return double.tryParse('${value ?? 0}') ?? 0;
+  }
+
+  String _formatVnd(double value) {
+    final raw = value.round().toString();
+    final buffer = StringBuffer();
+
+    for (var i = 0; i < raw.length; i++) {
+      final remaining = raw.length - i;
+
+      buffer.write(raw[i]);
+
+      if (remaining > 1 && remaining % 3 == 1) {
+        buffer.write('.');
+      }
+    }
+
+    return buffer.toString();
+  }
+
   // Hàm đồng bộ trạng thái từ Backend
   Future<void> _fetchInitialStatus() async {
     try {
@@ -186,6 +251,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     } catch (e) {
       debugPrint('Lỗi lấy trạng thái ban đầu ở Home: $e');
     }
+
+    // Home stats không phụ thuộc Online/Offline.
+    // Backend tự lọc theo ngày hiện tại nên sang ngày mới giá trị tự reset.
+    await _loadHomeStats();
 
     // Đồng bộ service theo trạng thái backend.
     if (_isOnline && _isAppInForeground) {
@@ -871,25 +940,34 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildStatsRow() {
-    return Row(
-      children: [
-        Expanded(child: _buildStatItem('ĐƠN HÔM NAY', '12')),
-        const SizedBox(width: 8),
-        Expanded(
-          child: _buildStatItem(
-            'COD ĐANG G...',
-            '1.250.000',
-            valueColor: Colors.deepOrange,
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(child: _buildStatItem('ĐƠN HÔM NAY', '$_todayOrderCount')),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _buildStatItem(
+              'COD ĐANG GIỮ',
+              _formatVnd(_codHolding),
+              valueColor: Colors.deepOrange,
+            ),
           ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(child: _buildStatItem('QUÃNG ĐƯỜ...', '45.8')),
-      ],
+          const SizedBox(width: 8),
+          Expanded(
+            child: _buildStatItem(
+              'QUÃNG ĐƯỜNG HÔM NAY',
+              '${_todayDistanceKm.toStringAsFixed(1)} km',
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildStatItem(String title, String value, {Color? valueColor}) {
     return Container(
+      constraints: const BoxConstraints(minHeight: 92),
       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -903,19 +981,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             title,
             style: TextStyle(
               fontSize: 10,
+              height: 1.2,
               color: Colors.grey.shade600,
               fontWeight: FontWeight.w600,
             ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+            // Không ellipsis: label phải hiển thị đủ.
+            softWrap: true,
           ),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: valueColor ?? Colors.black87,
+          const Spacer(),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: valueColor ?? Colors.black87,
+              ),
             ),
           ),
         ],
@@ -1115,10 +1198,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            _buildNavItem(Icons.home, 'Home', 0),
-            _buildNavItem(Icons.local_shipping_outlined, 'Orders', 1),
-            _buildNavItem(Icons.account_balance_wallet_outlined, 'Finance', 2),
-            _buildNavItem(Icons.person_outline, 'Profile', 3),
+            _buildNavItem(Icons.home, 'Trang chủ', 0),
+            _buildNavItem(Icons.local_shipping_outlined, 'Đơn hàng', 1),
+            _buildNavItem(Icons.account_balance_wallet_outlined, 'Đối soát', 2),
+            _buildNavItem(Icons.person_outline, 'Hồ sơ', 3),
           ],
         ),
       ),
@@ -1143,7 +1226,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: isActive
             ? BoxDecoration(
                 color: _primaryRed,

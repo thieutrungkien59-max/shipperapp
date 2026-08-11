@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import '../../../services/api_service.dart'; // Đảm bảo đường dẫn này đúng với project của bạn
 import 'edit_profile_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   final VoidCallback onBackPressed;
-  
-  const ProfileScreen({Key? key, required this.onBackPressed}) : super(key: key);
+
+  const ProfileScreen({Key? key, required this.onBackPressed})
+    : super(key: key);
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
@@ -26,12 +28,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String _loaiPhuongTien = '';
   String _taiTrongToiDa = '';
   int _taiTrongToiDaRaw = 0;
+
+  String _chieuDaiToiDa = '';
+  String _chieuRongToiDa = '';
+  String _chieuCaoToiDa = '';
+
+  // Thống kê hiệu suất từ backend.
+  int _tongDon = 0;
+  int _donThanhCong = 0;
+  double _tyLeThanhCong = 0;
+  double _danhGiaTrungBinh = 0;
+  int _soLuotDanhGia = 0;
+  bool _danhGiaCoDuLieu = false;
+
   bool _isApproved = false;
-  
+
   // ---> BỔ SUNG TÍNH NĂNG ĐỔI TRẠNG THÁI: Biến lưu trạng thái online/offline <---
   bool _isOnline = false;
-  
-  // Màu sắc chủ đạo 
+
+  // Màu sắc chủ đạo
   final Color _bgColor = const Color(0xFFFAF8F8);
   final Color _approvedColor = const Color(0xFF28A745);
   final Color _lockedColor = const Color(0xFFDC3545);
@@ -49,55 +64,134 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // Hàm gọi API lấy dữ liệu Hồ sơ
   Future<void> _fetchProfileData() async {
     try {
-      // 1. Lấy mã Shipper đã lưu lúc Đăng nhập
       final prefs = await SharedPreferences.getInstance();
       final maTk = prefs.getString('maTk');
 
       if (maTk == null || maTk.isEmpty) {
-        throw Exception('Không tìm thấy phiên đăng nhập. Vui lòng đăng nhập lại.');
+        throw Exception(
+          'Không tìm thấy phiên đăng nhập. Vui lòng đăng nhập lại.',
+        );
       }
 
-      // 2. Gọi API lấy thông tin 
       final response = await _apiService.get('/api/Auth/profile/$maTk');
-      print('=== DỮ LIỆU PROFILE TRẢ VỀ: ===');
-      print(response);
-      print('=================================');
-      
-      // 3. Cập nhật giao diện
-      if (mounted) {
-        setState(() {
-          // BƯỚC 1: Bóc tách lớp vỏ 'chiTiet' ra (không có lớp 'shipper' lồng bên trong)
-          final chiTiet = response['chiTiet'] ?? {};
 
-          // BƯỚC 2: Map dữ liệu trực tiếp từ 'chiTiet'
-          _hoTen = chiTiet['hoTen'] ?? 'Chưa cập nhật';
-          _soDienThoai = chiTiet['soDienThoai'] ?? '';
-          _cccd = chiTiet['cccd'] ?? 'Đang trống';
-          _gplx = chiTiet['gplx'] ?? 'Đang trống';
-          _bienSoXe = chiTiet['bienSoXe'] ?? 'Đang trống';
-          _loaiPhuongTien = chiTiet['loaiPhuongTien'] ?? 'Đang trống';
-          _taiTrongToiDaRaw = (chiTiet['taiTrongToiDa'] is int)
-              ? chiTiet['taiTrongToiDa']
-              : int.tryParse('${chiTiet['taiTrongToiDa'] ?? 0}') ?? 0;
-          _taiTrongToiDa = '$_taiTrongToiDaRaw kg';
-          
-          // Kiểm tra trạng thái hồ sơ (Trường 'trangThai' nằm ở ngoài cùng response)
-          _isApproved = response['trangThai'] == true;
-          
-          // ---> BỔ SUNG TÍNH NĂNG ĐỔI TRẠNG THÁI: Map dữ liệu TrucTuyen/NgoaiTuyen từ Backend <---
-          _isOnline = chiTiet['trangThaiHoatDong'] == 'TrucTuyen';
-          
-          _isLoading = false;
-        });
+      final chiTiet = response['chiTiet'] ?? {};
+      final maSp = (chiTiet['maSp'] ?? prefs.getString('maSp') ?? '')
+          .toString();
+
+      Map<String, dynamic> stats = {};
+
+      if (maSp.isNotEmpty) {
+        try {
+          final statsResponse = await _apiService.get(
+            '/api/DonHang/shipper/$maSp/thong-ke',
+          );
+
+          if (statsResponse is Map<String, dynamic>) {
+            stats = statsResponse;
+          } else if (statsResponse is Map) {
+            stats = Map<String, dynamic>.from(statsResponse);
+          }
+        } catch (e) {
+          // Profile vẫn hiển thị đầy đủ thông tin cá nhân nếu endpoint
+          // thống kê tạm thời lỗi.
+          debugPrint('Lỗi lấy thống kê hiệu suất: $e');
+        }
       }
+
+      final hieuSuat = stats['hieuSuat'] is Map
+          ? Map<String, dynamic>.from(stats['hieuSuat'])
+          : <String, dynamic>{};
+
+      if (!mounted) return;
+
+      setState(() {
+        _hoTen = _textOrFallback(chiTiet['hoTen'], 'Chưa cập nhật');
+
+        _soDienThoai = _textOrFallback(chiTiet['soDienThoai'], 'Chưa cập nhật');
+
+        _cccd = _textOrFallback(chiTiet['cccd'], 'Đang trống');
+
+        _gplx = _textOrFallback(chiTiet['gplx'], 'Đang trống');
+
+        _bienSoXe = _textOrFallback(chiTiet['bienSoXe'], 'Đang trống');
+
+        _loaiPhuongTien = _textOrFallback(
+          chiTiet['loaiPhuongTien'],
+          'Đang trống',
+        );
+
+        final taiTrong = _toDouble(chiTiet['taiTrongToiDa']);
+        _taiTrongToiDaRaw = taiTrong.round();
+        _taiTrongToiDa = taiTrong > 0
+            ? '${_formatNumber(taiTrong)} kg'
+            : 'Đang trống';
+
+        _chieuDaiToiDa = _formatDimension(chiTiet['chieuDaiToiDa']);
+        _chieuRongToiDa = _formatDimension(chiTiet['chieuRongToiDa']);
+        _chieuCaoToiDa = _formatDimension(chiTiet['chieuCaoToiDa']);
+
+        // Hồ sơ được duyệt dựa trên TrangThaiHoSo của Shipper,
+        // không dựa vào trạng thái active của TAI_KHOAN.
+        final trangThaiHoSo = (chiTiet['trangThaiHoSo'] ?? '').toString();
+
+        _isApproved = trangThaiHoSo.toLowerCase() == 'daduyet';
+
+        _isOnline =
+            chiTiet['trangThaiHoatDong'] == 'TrucTuyen' ||
+            chiTiet['trangThaiHoatDong'] == 'Online';
+
+        _tongDon = _toInt(hieuSuat['tongDon']);
+        _donThanhCong = _toInt(hieuSuat['donThanhCong']);
+        _tyLeThanhCong = _toDouble(hieuSuat['tyLeThanhCong']);
+        _danhGiaTrungBinh = _toDouble(hieuSuat['danhGiaTrungBinh']);
+        _soLuotDanhGia = _toInt(hieuSuat['soLuotDanhGia']);
+        _danhGiaCoDuLieu = hieuSuat['danhGiaCoDuLieu'] == true;
+
+        _errorMessage = '';
+        _isLoading = false;
+      });
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _errorMessage = e.toString().replaceAll('Exception: ', '');
-          _isLoading = false;
-        });
-      }
+      if (!mounted) return;
+
+      setState(() {
+        _errorMessage = e.toString().replaceAll('Exception: ', '');
+        _isLoading = false;
+      });
     }
+  }
+
+  String _textOrFallback(dynamic value, String fallback) {
+    final text = (value ?? '').toString().trim();
+    return text.isEmpty ? fallback : text;
+  }
+
+  int _toInt(dynamic value) {
+    if (value is num) return value.toInt();
+    return int.tryParse('${value ?? 0}') ?? 0;
+  }
+
+  double _toDouble(dynamic value) {
+    if (value is num) return value.toDouble();
+    return double.tryParse('${value ?? 0}') ?? 0;
+  }
+
+  String _formatNumber(double value) {
+    if (value == value.roundToDouble()) {
+      return value.toInt().toString();
+    }
+
+    return value.toStringAsFixed(1);
+  }
+
+  String _formatDimension(dynamic value) {
+    final number = _toDouble(value);
+
+    if (number <= 0) {
+      return 'Không giới hạn';
+    }
+
+    return '${_formatNumber(number)} cm';
   }
 
   // ---> BỔ SUNG TÍNH NĂNG ĐỔI TRẠNG THÁI: Hàm gọi API POST để cập nhật trạng thái mới <---
@@ -108,7 +202,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       if (maSp == null || maSp.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Lỗi: Không tìm thấy mã Shipper!'), backgroundColor: Colors.red),
+          const SnackBar(
+            content: Text('Lỗi: Không tìm thấy mã Shipper!'),
+            backgroundColor: Colors.red,
+          ),
         );
         return;
       }
@@ -116,13 +213,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
       // Xác định chuỗi trạng thái mới
       final trangThaiMoi = newValue ? 'TrucTuyen' : 'NgoaiTuyen';
 
-      final body = {
-        "maShipper": maSp,
-        "trangThaiMoi": trangThaiMoi
-      };
+      final body = {"maShipper": maSp, "trangThaiMoi": trangThaiMoi};
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Đang cập nhật trạng thái...'), duration: Duration(seconds: 1)),
+        const SnackBar(
+          content: Text('Đang cập nhật trạng thái...'),
+          duration: Duration(seconds: 1),
+        ),
       );
 
       // Gọi API POST
@@ -135,7 +232,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Đã chuyển sang: ${newValue ? "Đang nhận đơn" : "Ngoại tuyến"}'),
+            content: Text(
+              'Đã chuyển sang: ${newValue ? "Đang nhận đơn" : "Ngoại tuyến"}',
+            ),
             backgroundColor: Colors.green,
             duration: const Duration(seconds: 2),
           ),
@@ -146,7 +245,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Lỗi cập nhật: ${e.toString().replaceAll('Exception: ', '')}'),
+            content: Text(
+              'Lỗi cập nhật: ${e.toString().replaceAll('Exception: ', '')}',
+            ),
             backgroundColor: Colors.red,
           ),
         );
@@ -158,81 +259,91 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget build(BuildContext context) {
     return Container(
       color: _bgColor,
-      child: _isLoading 
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFFE51D35)))
+      child: _isLoading
+          ? const Center(
+              child: CircularProgressIndicator(color: Color(0xFFE51D35)),
+            )
           : _errorMessage.isNotEmpty
-              ? Center(child: Text(_errorMessage, style: const TextStyle(color: Colors.red)))
-              : SingleChildScrollView(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.center,
+          ? Center(
+              child: Text(
+                _errorMessage,
+                style: const TextStyle(color: Colors.red),
+              ),
+            )
+          : SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    const SizedBox(height: 16),
+                    // --- Thanh Custom Header ---
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const SizedBox(height: 16),
-                        // --- Thanh Custom Header ---
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            IconButton(
-                              icon: const Icon(Icons.arrow_back, color: Colors.black87),
-                              onPressed: () {
-                                widget.onBackPressed();
-                              },
-                            ),
-                            const Text(
-                              'Hồ sơ của tôi',
-                              style: TextStyle(
-                                color: Colors.black87,
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.edit, color: Colors.black54),
-                              onPressed: () async {
-                                final result = await Navigator.push<bool>(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => EditProfileScreen(
-                                      hoTen: _hoTen,
-                                      soDienThoai: _soDienThoai,
-                                      cccd: _cccd,
-                                      gplx: _gplx,
-                                      bienSoXe: _bienSoXe,
-                                      loaiPhuongTien: _loaiPhuongTien,
-                                      taiTrongToiDa: _taiTrongToiDaRaw,
-                                    ),
-                                  ),
-                                );
-
-                                // Nếu lưu thành công, tải lại dữ liệu hồ sơ mới nhất
-                                if (result == true) {
-                                  setState(() => _isLoading = true);
-                                  _fetchProfileData();
-                                }
-                              },
-                            ),
-                          ],
+                        IconButton(
+                          icon: const Icon(
+                            Icons.arrow_back,
+                            color: Colors.black87,
+                          ),
+                          onPressed: () {
+                            widget.onBackPressed();
+                          },
                         ),
-                        // ----------------------------------------------------------------------
-                        const SizedBox(height: 16),
-                        _buildAvatarAndName(),
-                        const SizedBox(height: 12),
-                        _buildStatusBadge(),
-                        
-                        const SizedBox(height: 24),
-                        // ---> BỔ SUNG TÍNH NĂNG ĐỔI TRẠNG THÁI: Gọi Widget nút gạt ở đây <---
-                        _buildActiveStatusToggle(),
-                        
-                        const SizedBox(height: 24),
-                        _buildPerformanceStats(),
-                        const SizedBox(height: 16),
-                        _buildPersonalInfo(),
-                        const SizedBox(height: 32),
+                        const Text(
+                          'Hồ sơ của tôi',
+                          style: TextStyle(
+                            color: Colors.black87,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.edit, color: Colors.black54),
+                          onPressed: () async {
+                            final result = await Navigator.push<bool>(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => EditProfileScreen(
+                                  hoTen: _hoTen,
+                                  soDienThoai: _soDienThoai,
+                                  cccd: _cccd,
+                                  gplx: _gplx,
+                                  bienSoXe: _bienSoXe,
+                                  loaiPhuongTien: _loaiPhuongTien,
+                                  taiTrongToiDa: _taiTrongToiDaRaw,
+                                ),
+                              ),
+                            );
+
+                            // Nếu lưu thành công, tải lại dữ liệu hồ sơ mới nhất
+                            if (result == true) {
+                              setState(() => _isLoading = true);
+                              _fetchProfileData();
+                            }
+                          },
+                        ),
                       ],
                     ),
-                  ),
+                    // ----------------------------------------------------------------------
+                    const SizedBox(height: 16),
+                    _buildAvatarAndName(),
+                    const SizedBox(height: 12),
+                    _buildStatusBadge(),
+
+                    const SizedBox(height: 24),
+                    // ---> BỔ SUNG TÍNH NĂNG ĐỔI TRẠNG THÁI: Gọi Widget nút gạt ở đây <---
+                    _buildActiveStatusToggle(),
+
+                    const SizedBox(height: 24),
+                    _buildPerformanceStats(),
+                    const SizedBox(height: 16),
+                    _buildPersonalInfo(),
+                    const SizedBox(height: 32),
+                  ],
                 ),
+              ),
+            ),
     );
   }
 
@@ -262,14 +373,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const Text(
                     'Trạng thái hoạt động',
                     style: TextStyle(
-                      fontSize: 16, 
+                      fontSize: 16,
                       fontWeight: FontWeight.bold,
                       color: Colors.black87,
                     ),
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    _isOnline ? 'Đang nhận đơn (Trực tuyến)' : 'Nghỉ ngơi (Ngoại tuyến)',
+                    _isOnline
+                        ? 'Đang nhận đơn (Trực tuyến)'
+                        : 'Nghỉ ngơi (Ngoại tuyến)',
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
@@ -306,7 +419,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               child: const CircleAvatar(
                 radius: 40,
-                backgroundImage: NetworkImage('https://i.pravatar.cc/150?img=11'),
+                backgroundImage: NetworkImage(
+                  'https://i.pravatar.cc/150?img=11',
+                ),
               ),
             ),
             Container(
@@ -332,10 +447,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         const SizedBox(height: 4),
         Text(
           _soDienThoai,
-          style: const TextStyle(
-            fontSize: 15,
-            color: Colors.black54,
-          ),
+          style: const TextStyle(fontSize: 15, color: Colors.black54),
         ),
       ],
     );
@@ -393,11 +505,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _buildStatColumn('TỔNG ĐƠN', '0'), // Có thể map API thống kê vào đây sau
+              Expanded(child: _buildStatColumn('TỔNG ĐƠN', '$_tongDon')),
               _buildVerticalDivider(),
-              _buildStatColumn('THÀNH CÔNG', '0%', valueColor: _approvedColor),
+              Expanded(
+                child: _buildStatColumn(
+                  'THÀNH CÔNG',
+                  '${_tyLeThanhCong.toStringAsFixed(1)}%',
+                  valueColor: _approvedColor,
+                  subtitle: '$_donThanhCong đơn',
+                ),
+              ),
               _buildVerticalDivider(),
-              _buildStatColumn('ĐÁNH GIÁ', '0 ⭐'),
+              Expanded(
+                child: _buildStatColumn(
+                  'ĐÁNH GIÁ',
+                  _danhGiaCoDuLieu
+                      ? '${_danhGiaTrungBinh.toStringAsFixed(1)} ⭐'
+                      : '—',
+                  subtitle: _danhGiaCoDuLieu
+                      ? '$_soLuotDanhGia lượt'
+                      : 'Chưa có dữ liệu',
+                ),
+              ),
             ],
           ),
         ],
@@ -405,11 +534,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildStatColumn(String label, String value, {Color? valueColor}) {
+  Widget _buildStatColumn(
+    String label,
+    String value, {
+    Color? valueColor,
+    String? subtitle,
+  }) {
     return Column(
       children: [
         Text(
           label,
+          textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w600,
@@ -417,24 +552,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ),
         const SizedBox(height: 8),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            color: valueColor ?? Colors.black87,
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            value,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: valueColor ?? Colors.black87,
+            ),
           ),
         ),
+        if (subtitle != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+          ),
+        ],
       ],
     );
   }
 
   Widget _buildVerticalDivider() {
-    return Container(
-      height: 40,
-      width: 1,
-      color: Colors.grey.shade200,
-    );
+    return Container(height: 40, width: 1, color: Colors.grey.shade200);
   }
 
   Widget _buildPersonalInfo() {
@@ -461,11 +603,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const Divider(height: 24, thickness: 1),
           _buildInfoRow('GPLX', _gplx),
           const Divider(height: 24, thickness: 1),
-          _buildInfoRow('Đăng ký xe', _bienSoXe),
+          _buildInfoRow('Biển số xe', _bienSoXe),
           const Divider(height: 24, thickness: 1),
           _buildInfoRow('Loại phương tiện', _loaiPhuongTien),
           const Divider(height: 24, thickness: 1),
           _buildInfoRow('Tải trọng tối đa', _taiTrongToiDa),
+          const Divider(height: 24, thickness: 1),
+          _buildInfoRow('Chiều dài tối đa', _chieuDaiToiDa),
+          const Divider(height: 24, thickness: 1),
+          _buildInfoRow('Chiều rộng tối đa', _chieuRongToiDa),
+          const Divider(height: 24, thickness: 1),
+          _buildInfoRow('Chiều cao tối đa', _chieuCaoToiDa),
         ],
       ),
     );
@@ -473,21 +621,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildInfoRow(String label, String value) {
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 14,
-            color: Colors.grey.shade600,
+        Expanded(
+          flex: 4,
+          child: Text(
+            label,
+            style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
           ),
         ),
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: Colors.black87,
+        const SizedBox(width: 12),
+        Expanded(
+          flex: 6,
+          child: Text(
+            value,
+            textAlign: TextAlign.right,
+            softWrap: true,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Colors.black87,
+            ),
           ),
         ),
       ],

@@ -1,23 +1,33 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../../../services/api_service.dart';
+
 import '../../../core/repositories/order_repository.dart';
+import '../../../services/api_service.dart';
 import 'camera_capture_screen.dart';
 
 class CameraProofScreen extends StatefulWidget {
   final bool isDeliveryPhase;
   final String maDh;
-  final String phoneNumber; // SĐT để gọi (người nhận nếu pha giao, người gửi nếu pha lấy)
+  final String
+  phoneNumber; // SĐT để gọi (người nhận nếu pha giao, người gửi nếu pha lấy)
+
+  // Giá trị COD dùng để xác định số lượng minh chứng bắt buộc.
+  //
+  // < 1.000.000đ  : chỉ cần ẢNH hoặc CHỮ KÝ.
+  // >= 1.000.000đ : bắt buộc cả ẢNH và CHỮ KÝ.
+  final double codAmount;
 
   const CameraProofScreen({
     Key? key,
     required this.isDeliveryPhase,
     required this.maDh,
     required this.phoneNumber,
+    required this.codAmount,
   }) : super(key: key);
 
   @override
@@ -38,7 +48,8 @@ class _CameraProofScreenState extends State<CameraProofScreen> {
   // Dùng RepaintBoundary để "chụp" đúng những gì đang vẽ trên canvas thành ảnh PNG,
   // giống hệt cơ chế chụp ảnh gói hàng — chỉ khác nguồn ảnh là canvas vẽ tay thay vì camera.
   final GlobalKey _signatureBoundaryKey = GlobalKey();
-  final List<Offset?> _signaturePoints = []; // null = ngắt nét (nhấc bút/tay lên)
+  final List<Offset?> _signaturePoints =
+      []; // null = ngắt nét (nhấc bút/tay lên)
   Uint8List? _signatureBytes; // Ảnh chữ ký đã "Lưu", null nếu chưa lưu
   bool _isSavingSignature = false;
   bool get _hasSignature => _signatureBytes != null;
@@ -68,8 +79,17 @@ class _CameraProofScreenState extends State<CameraProofScreen> {
     super.dispose();
   }
 
-  // Đủ điều kiện xác thực hay chưa (chỉ còn Chữ ký, không còn OTP)
-  bool get _isAuthComplete => _hasSignature;
+  static const double _proofThreshold = 1000000;
+
+  bool get _requiresBothProofs => widget.codAmount >= _proofThreshold;
+
+  bool get _isProofValid {
+    if (_requiresBothProofs) {
+      return _hasPhoto && _hasSignature;
+    }
+
+    return _hasPhoto || _hasSignature;
+  }
 
   // ----- CHỤP ẢNH: MỞ MÀN HÌNH CAMERA LIVE PREVIEW TRONG APP -----
   Future<void> _pickPhoto() async {
@@ -87,7 +107,9 @@ class _CameraProofScreenState extends State<CameraProofScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Không thể mở camera: ${e.toString().replaceAll('Exception: ', '')}'),
+            content: Text(
+              'Không thể mở camera: ${e.toString().replaceAll('Exception: ', '')}',
+            ),
             backgroundColor: Colors.red,
             behavior: SnackBarBehavior.floating,
           ),
@@ -155,11 +177,16 @@ class _CameraProofScreenState extends State<CameraProofScreen> {
 
     setState(() => _isSavingSignature = true);
     try {
-      final boundary = _signatureBoundaryKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+      final boundary =
+          _signatureBoundaryKey.currentContext!.findRenderObject()
+              as RenderRepaintBoundary;
       final ui.Image image = await boundary.toImage(pixelRatio: 2.0);
-      final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      final ByteData? byteData = await image.toByteData(
+        format: ui.ImageByteFormat.png,
+      );
 
-      if (byteData == null) throw Exception('Không thể lưu ảnh chữ ký, vui lòng thử lại.');
+      if (byteData == null)
+        throw Exception('Không thể lưu ảnh chữ ký, vui lòng thử lại.');
 
       if (!mounted) return;
       setState(() {
@@ -169,7 +196,9 @@ class _CameraProofScreenState extends State<CameraProofScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Lỗi lưu chữ ký: ${e.toString().replaceAll('Exception: ', '')}'),
+            content: Text(
+              'Lỗi lưu chữ ký: ${e.toString().replaceAll('Exception: ', '')}',
+            ),
             backgroundColor: Colors.red,
             behavior: SnackBarBehavior.floating,
           ),
@@ -184,7 +213,10 @@ class _CameraProofScreenState extends State<CameraProofScreen> {
   Future<void> _handleCall() async {
     if (widget.phoneNumber.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Không có số điện thoại để gọi.'), backgroundColor: Colors.red),
+        const SnackBar(
+          content: Text('Không có số điện thoại để gọi.'),
+          backgroundColor: Colors.red,
+        ),
       );
       return;
     }
@@ -194,13 +226,21 @@ class _CameraProofScreenState extends State<CameraProofScreen> {
       final launched = await launchUrl(telUri);
       if (!launched && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Không thể mở ứng dụng gọi điện trên thiết bị này.'), backgroundColor: Colors.red),
+          const SnackBar(
+            content: Text('Không thể mở ứng dụng gọi điện trên thiết bị này.'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Lỗi khi gọi điện: ${e.toString().replaceAll('Exception: ', '')}'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text(
+              'Lỗi khi gọi điện: ${e.toString().replaceAll('Exception: ', '')}',
+            ),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
@@ -217,7 +257,9 @@ class _CameraProofScreenState extends State<CameraProofScreen> {
             child: SingleChildScrollView(
               // Khoá cuộn trang trong lúc đang vẽ chữ ký -> đảm bảo trang không "giành" mất
               // cử chỉ kéo giữa chừng, cho phép vẽ nét dài/nhiều nét thoải mái đến khi xong.
-              physics: _isDrawingSignature ? const NeverScrollableScrollPhysics() : const AlwaysScrollableScrollPhysics(),
+              physics: _isDrawingSignature
+                  ? const NeverScrollableScrollPhysics()
+                  : const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.all(16.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -244,8 +286,14 @@ class _CameraProofScreenState extends State<CameraProofScreen> {
 
                   const SizedBox(height: 24),
                   Text(
-                    widget.isDeliveryPhase ? 'Tên người nhận thực tế' : 'Tên người gửi thực tế',
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87),
+                    widget.isDeliveryPhase
+                        ? 'Tên người nhận thực tế'
+                        : 'Tên người gửi thực tế',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
+                    ),
                   ),
                   const SizedBox(height: 8),
                   _buildNameInput(),
@@ -273,7 +321,11 @@ class _CameraProofScreenState extends State<CameraProofScreen> {
         children: [
           Text(
             widget.isDeliveryPhase ? 'Xác nhận giao hàng' : 'Xác nhận lấy hàng',
-            style: const TextStyle(color: Colors.black87, fontSize: 18, fontWeight: FontWeight.bold),
+            style: const TextStyle(
+              color: Colors.black87,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
           ),
           const SizedBox(height: 2),
           Text(
@@ -286,6 +338,8 @@ class _CameraProofScreenState extends State<CameraProofScreen> {
   }
 
   Widget _buildWarningBanner() {
+    final bool requiresBoth = _requiresBothProofs;
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -299,14 +353,14 @@ class _CameraProofScreenState extends State<CameraProofScreen> {
           Icon(Icons.info_outline, color: Colors.orange.shade700, size: 20),
           const SizedBox(width: 12),
           Expanded(
-            child: RichText(
-              text: const TextSpan(
-                style: TextStyle(color: Colors.black87, fontSize: 13, height: 1.4),
-                children: [
-                  TextSpan(text: 'Đơn hàng '),
-                  TextSpan(text: '≥ 1.000.000đ', style: TextStyle(fontWeight: FontWeight.bold)),
-                  TextSpan(text: ' — cần đủ 2 minh chứng'),
-                ],
+            child: Text(
+              requiresBoth
+                  ? 'COD từ 1.000.000đ trở lên — bắt buộc đủ ảnh gói hàng và chữ ký.'
+                  : 'COD dưới 1.000.000đ — chỉ cần ít nhất 1 trong 2 minh chứng: ảnh gói hàng hoặc chữ ký.',
+              style: const TextStyle(
+                color: Colors.black87,
+                fontSize: 13,
+                height: 1.4,
               ),
             ),
           ),
@@ -353,45 +407,76 @@ class _CameraProofScreenState extends State<CameraProofScreen> {
         child: _isCapturingPhoto
             ? const Center(child: CircularProgressIndicator())
             : _hasPhoto
-                ? Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      Image.memory(_photoBytes!, fit: BoxFit.cover),
-                      Positioned(
-                        top: 12,
-                        right: 12,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                          decoration: BoxDecoration(color: _successGreen, borderRadius: BorderRadius.circular(20)),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: const [
-                              Icon(Icons.check_circle_outline, color: Colors.white, size: 14),
-                              SizedBox(width: 4),
-                              Text('Đã chụp', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-                            ],
+            ? Stack(
+                fit: StackFit.expand,
+                children: [
+                  Image.memory(_photoBytes!, fit: BoxFit.cover),
+                  Positioned(
+                    top: 12,
+                    right: 12,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _successGreen,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: const [
+                          Icon(
+                            Icons.check_circle_outline,
+                            color: Colors.white,
+                            size: 14,
                           ),
-                        ),
+                          SizedBox(width: 4),
+                          Text(
+                            'Đã chụp',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
                       ),
-                      Positioned(
-                        bottom: 12,
-                        right: 12,
-                        child: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-                          child: const Icon(Icons.refresh, color: Colors.black87, size: 24),
-                        ),
-                      ),
-                    ],
-                  )
-                : Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.camera_alt_outlined, size: 48, color: Colors.grey.shade400),
-                      const SizedBox(height: 8),
-                      Text('Nhấn để chụp ảnh gói hàng', style: TextStyle(color: Colors.grey.shade600)),
-                    ],
+                    ),
                   ),
+                  Positioned(
+                    bottom: 12,
+                    right: 12,
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.refresh,
+                        color: Colors.black87,
+                        size: 24,
+                      ),
+                    ),
+                  ),
+                ],
+              )
+            : Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.camera_alt_outlined,
+                    size: 48,
+                    color: Colors.grey.shade400,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Nhấn để chụp ảnh gói hàng',
+                    style: TextStyle(color: Colors.grey.shade600),
+                  ),
+                ],
+              ),
       ),
     );
   }
@@ -417,14 +502,31 @@ class _CameraProofScreenState extends State<CameraProofScreen> {
               top: 12,
               right: 12,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(color: _successGreen, borderRadius: BorderRadius.circular(20)),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: _successGreen,
+                  borderRadius: BorderRadius.circular(20),
+                ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: const [
-                    Icon(Icons.check_circle_outline, color: Colors.white, size: 14),
+                    Icon(
+                      Icons.check_circle_outline,
+                      color: Colors.white,
+                      size: 14,
+                    ),
                     SizedBox(width: 4),
-                    Text('Đã ký', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                    Text(
+                      'Đã ký',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -462,7 +564,8 @@ class _CameraProofScreenState extends State<CameraProofScreen> {
             child: Container(
               height: 220,
               width: double.infinity,
-              color: Colors.white, // Nền trắng thật sự -> ảnh chụp ra cũng có nền trắng
+              color: Colors
+                  .white, // Nền trắng thật sự -> ảnh chụp ra cũng có nền trắng
               child: Stack(
                 children: [
                   if (_signaturePoints.isEmpty)
@@ -470,9 +573,16 @@ class _CameraProofScreenState extends State<CameraProofScreen> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.draw_outlined, size: 32, color: Colors.grey.shade300),
+                          Icon(
+                            Icons.draw_outlined,
+                            size: 32,
+                            color: Colors.grey.shade300,
+                          ),
                           const SizedBox(height: 8),
-                          Text('Ký tên vào đây', style: TextStyle(color: Colors.grey.shade400)),
+                          Text(
+                            'Ký tên vào đây',
+                            style: TextStyle(color: Colors.grey.shade400),
+                          ),
                         ],
                       ),
                     ),
@@ -504,19 +614,28 @@ class _CameraProofScreenState extends State<CameraProofScreen> {
           child: Row(
             children: [
               TextButton.icon(
-                onPressed: _signaturePoints.isEmpty ? null : _clearSignatureDrawing,
+                onPressed: _signaturePoints.isEmpty
+                    ? null
+                    : _clearSignatureDrawing,
                 icon: const Icon(Icons.delete_outline, size: 18),
                 label: const Text('Xoá'),
-                style: TextButton.styleFrom(foregroundColor: Colors.grey.shade600),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.grey.shade600,
+                ),
               ),
               const Spacer(),
               TextButton.icon(
-                onPressed: (_signaturePoints.isEmpty || _isSavingSignature) ? null : _handleSaveSignature,
+                onPressed: (_signaturePoints.isEmpty || _isSavingSignature)
+                    ? null
+                    : _handleSaveSignature,
                 icon: _isSavingSignature
                     ? SizedBox(
                         height: 16,
                         width: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: _primaryRed),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: _primaryRed,
+                        ),
                       )
                     : const Icon(Icons.save_outlined, size: 18),
                 label: const Text('Lưu chữ ký'),
@@ -535,24 +654,44 @@ class _CameraProofScreenState extends State<CameraProofScreen> {
       decoration: InputDecoration(
         filled: true,
         fillColor: Colors.white,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: _primaryRed)),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 16,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey.shade300),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey.shade300),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: _primaryRed),
+        ),
       ),
     );
   }
 
   Future<void> _handleCompleteProof() async {
-    if (_photoBytes == null || _signatureBytes == null) return; // An toàn: nút chỉ bật khi đã đủ 2 minh chứng
+    if (!_isProofValid) return;
 
     setState(() => _isUploading = true);
 
     try {
+      final String? photoData = _photoBytes == null
+          ? null
+          : _buildImageDataUri(_photoBytes!);
+
+      final String? signatureData = _signatureBytes == null
+          ? null
+          : _buildImageDataUri(_signatureBytes!);
+
       await _orderRepository.uploadDeliveryProof(
         maDonHang: widget.maDh,
-        hinhAnhUrl: _buildImageDataUri(_photoBytes!),
-        chuKyOtp: _buildImageDataUri(_signatureBytes!), // Ảnh chữ ký, base64 giống ảnh gói hàng
+        hinhAnhUrl: photoData,
+        chuKyOtp: signatureData,
       );
 
       if (!mounted) return;
@@ -561,51 +700,75 @@ class _CameraProofScreenState extends State<CameraProofScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Lỗi lưu minh chứng: ${e.toString().replaceAll('Exception: ', '')}'),
+            content: Text(
+              'Lỗi lưu minh chứng: '
+              '${e.toString().replaceAll('Exception: ', '')}',
+            ),
             backgroundColor: Colors.red,
           ),
         );
       }
     } finally {
-      if (mounted) setState(() => _isUploading = false);
+      if (mounted) {
+        setState(() => _isUploading = false);
+      }
     }
   }
 
   Widget _buildBottomAction() {
-    // ĐIỀU KIỆN ĐỂ NÚT HOÀN THÀNH SÁNG LÊN
-    bool isFormValid = _hasPhoto && _isAuthComplete;
+    final bool isFormValid = _isProofValid;
+
+    final String helperText = _requiresBothProofs
+        ? 'Cần đủ ảnh gói hàng và chữ ký để hoàn thành'
+        : 'Chỉ cần ảnh gói hàng hoặc chữ ký để hoàn thành';
 
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: Colors.grey.shade200))),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(top: BorderSide(color: Colors.grey.shade200)),
+      ),
       child: SafeArea(
         child: Column(
           children: [
-            const Text('Nút sẽ được kích hoạt khi đã đủ minh chứng bắt buộc', style: TextStyle(fontSize: 11, color: Colors.black54)),
+            Text(
+              helperText,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 11, color: Colors.black54),
+            ),
             const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
               height: 54,
               child: ElevatedButton(
-                // Nếu chưa đủ điều kiện hoặc đang gửi -> onPressed = null (nút tự động bị mờ/disable)
-                onPressed: (isFormValid && !_isUploading) ? _handleCompleteProof : null,
+                onPressed: (isFormValid && !_isUploading)
+                    ? _handleCompleteProof
+                    : null,
                 style: ElevatedButton.styleFrom(
-                  // Thay đổi màu nền tùy theo trạng thái hợp lệ
-                  backgroundColor: isFormValid ? _primaryRed : Colors.grey.shade300,
-                  disabledBackgroundColor: Colors.grey.shade300, // Màu khi bị disable
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  backgroundColor: isFormValid
+                      ? _primaryRed
+                      : Colors.grey.shade300,
+                  disabledBackgroundColor: Colors.grey.shade300,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                   elevation: 0,
                 ),
                 child: _isUploading
                     ? const SizedBox(
                         height: 22,
                         width: 22,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
                       )
                     : Text(
                         'Hoàn thành',
                         style: TextStyle(
-                          color: isFormValid ? Colors.white : Colors.grey.shade500, // Đổi màu chữ tương ứng
+                          color: isFormValid
+                              ? Colors.white
+                              : Colors.grey.shade500,
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
                         ),
@@ -613,7 +776,10 @@ class _CameraProofScreenState extends State<CameraProofScreen> {
               ),
             ),
             const SizedBox(height: 8),
-            const Text('Ảnh được tự động nén để tối ưu dung lượng (max 2MB)', style: TextStyle(fontSize: 10, color: Colors.black45)),
+            const Text(
+              'Ảnh được tự động nén để tối ưu dung lượng (max 2MB)',
+              style: TextStyle(fontSize: 10, color: Colors.black45),
+            ),
           ],
         ),
       ),
