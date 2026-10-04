@@ -6,9 +6,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/repositories/order_repository.dart';
 import '../../../core/repositories/shipper_repository.dart';
+import '../../../core/config/app_config.dart';
+import '../../../core/demo/demo_delivery_store.dart';
 import '../../../models/don_hang_model.dart';
 import '../../../services/api_service.dart';
 import '../../../services/location_service.dart';
+import '../../../services/session_service.dart';
+import '../../auth/screens/login_screen.dart';
+import '../../demo/screens/api_status_screen.dart';
 import '../../orders/screens/order_accept_screen.dart';
 import '../../orders/screens/order_list_tab.dart';
 import '../../profile/screens/profile_screen.dart';
@@ -158,6 +163,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final maSp = prefs.getString('maSp');
 
       if (maSp != null && maSp.isNotEmpty) {
+        if (AppConfig.demoMode) {
+          DemoDeliveryStore.instance.isOnline = false;
+          if (mounted) setState(() => _isOnline = false);
+          return;
+        }
         final body = {"maShipper": maSp, "trangThaiMoi": "NgoaiTuyen"};
 
         // Gọi API ép về Ngoại tuyến
@@ -185,6 +195,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final maSp = prefs.getString('maSp');
 
       if (maSp == null || maSp.isEmpty) return;
+
+      if (AppConfig.demoMode) {
+        final order = DemoDeliveryStore.instance.order;
+        if (!mounted) return;
+        setState(() {
+          _todayOrderCount = order.trangThai == 'DaGiao' ? 1 : 0;
+          _todayDistanceKm = order.trangThai == 'DaGiao'
+              ? order.quangDuongKm ?? 0
+              : 0;
+          _codHolding = DemoDeliveryStore.instance.wallet.soDuHienTai;
+        });
+        return;
+      }
 
       final response = await _apiService.get(
         '/api/DonHang/shipper/$maSp/thong-ke',
@@ -236,6 +259,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   // Hàm đồng bộ trạng thái từ Backend
   Future<void> _fetchInitialStatus() async {
+    if (AppConfig.demoMode) {
+      if (mounted) {
+        setState(() => _isOnline = DemoDeliveryStore.instance.isOnline);
+      }
+      await _loadHomeStats();
+      if (_isOnline) {
+        await _loadOrders();
+        _startAssignmentPolling();
+      }
+      return;
+    }
     try {
       final prefs = await SharedPreferences.getInstance();
       final maTk = prefs.getString('maTk');
@@ -666,6 +700,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final newValue = !_isOnline;
       final trangThaiMoi = newValue ? 'TrucTuyen' : 'NgoaiTuyen';
 
+      if (AppConfig.demoMode) {
+        DemoDeliveryStore.instance.isOnline = newValue;
+        if (mounted) setState(() => _isOnline = newValue);
+        if (newValue) {
+          await _loadOrders();
+          _startAssignmentPolling();
+        } else {
+          _stopAssignmentPolling();
+          _clearOrders();
+        }
+        return;
+      }
+
       final body = {"maShipper": maSp, "trangThaiMoi": trangThaiMoi};
 
       await _apiService.post('/api/Shipper/doi-trang-thai-hoat-dong', body);
@@ -708,6 +755,48 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _logout() async {
+    _stopAssignmentPolling();
+    await _stopLocationTracking();
+    await SessionService.clear();
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (_) => false,
+    );
+  }
+
+  Future<void> _resetDemoData() async {
+    if (!AppConfig.demoMode) return;
+    _stopAssignmentPolling();
+    await _stopLocationTracking();
+    DemoDeliveryStore.instance.reset();
+    final prefs = await SharedPreferences.getInstance();
+    final keysToRemove = prefs
+        .getKeys()
+        .where((key) => key.startsWith('shipper_arrived_DEMO-ORDER-001_'))
+        .toList();
+    for (final key in keysToRemove) {
+      await prefs.remove(key);
+    }
+    if (!mounted) return;
+    setState(() {
+      _isOnline = false;
+      _homeOrders = <DonHangModel>[];
+      _notifiedOrderIds.clear();
+      _todayOrderCount = 0;
+      _todayDistanceKm = 0;
+      _codHolding = 0;
+      _ordersError = null;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Đã reset dữ liệu Demo về trạng thái ban đầu.'),
+      ),
+    );
+  }
+
   // ====================================================================================
   // PHẦN BÊN DƯỚI LÀ GIAO DIỆN UI
   // ====================================================================================
@@ -728,9 +817,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       elevation: 0,
       title: Row(
         children: [
-          const CircleAvatar(
-            backgroundImage: NetworkImage('https://i.pravatar.cc/150?img=11'),
+          CircleAvatar(
+            backgroundColor: _primaryRed.withValues(alpha: 0.12),
             radius: 18,
+            child: Icon(Icons.delivery_dining, color: _primaryRed, size: 22),
           ),
           const SizedBox(width: 12),
           Text(
@@ -744,9 +834,37 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ],
       ),
       actions: [
+        if (AppConfig.demoMode)
+          IconButton(
+            tooltip: 'API Status',
+            icon: const Icon(
+              Icons.monitor_heart_outlined,
+              color: Colors.black87,
+            ),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ApiStatusScreen()),
+              );
+            },
+          ),
         IconButton(
           icon: const Icon(Icons.notifications_none, color: Colors.black87),
           onPressed: () {},
+        ),
+        PopupMenuButton<String>(
+          onSelected: (value) {
+            if (value == 'logout') _logout();
+            if (value == 'reset-demo') _resetDemoData();
+          },
+          itemBuilder: (_) => [
+            if (AppConfig.demoMode)
+              const PopupMenuItem(
+                value: 'reset-demo',
+                child: Text('RESET DEMO DATA'),
+              ),
+            const PopupMenuItem(value: 'logout', child: Text('Đăng xuất')),
+          ],
         ),
       ],
     );
@@ -783,6 +901,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (AppConfig.demoMode) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.orange.shade200),
+                ),
+                child: Text(
+                  'DEMO MODE · API ${AppConfig.apiModeLabel}',
+                  style: TextStyle(
+                    color: Colors.orange.shade900,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
             _buildStatusCard(),
             const SizedBox(height: 16),
             _buildStatsRow(),

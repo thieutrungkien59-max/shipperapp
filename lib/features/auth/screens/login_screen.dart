@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../core/repositories/auth_repository.dart';
+import '../../../core/config/app_config.dart';
 import '../../../services/api_service.dart';
 import '../../home/screens/home_screen.dart'; // Đảm bảo đường dẫn này trỏ đúng tới HomeScreen của bạn
 import 'register_screen.dart';
@@ -15,10 +16,10 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   // Key để quản lý trạng thái của Form và kích hoạt tính năng validate
   final _formKey = GlobalKey<FormState>();
-  
+
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
-  
+
   bool _isPasswordVisible = false;
   bool _isLoading = false;
 
@@ -31,7 +32,9 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void initState() {
     super.initState();
-    _authRepository = AuthRepository(ApiServices()); // Đã sửa thành ApiService cho đúng với cấu trúc của bạn
+    _authRepository = AuthRepository(
+      ApiServices(),
+    ); // Đã sửa thành ApiService cho đúng với cấu trúc của bạn
   }
 
   @override
@@ -151,18 +154,27 @@ class _LoginScreenState extends State<LoginScreen> {
                           controller: _phoneController,
                           keyboardType: TextInputType.phone,
                           // Chỉ cho phép nhập số
-                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                          ],
                           decoration: InputDecoration(
                             hintText: '09xxxxxxxx',
                             hintStyle: TextStyle(color: Colors.grey.shade400),
-                            prefixIcon: Icon(Icons.phone_outlined, color: Colors.grey.shade600),
+                            prefixIcon: Icon(
+                              Icons.phone_outlined,
+                              color: Colors.grey.shade600,
+                            ),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8),
-                              borderSide: BorderSide(color: Colors.grey.shade300),
+                              borderSide: BorderSide(
+                                color: Colors.grey.shade300,
+                              ),
                             ),
                             enabledBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8),
-                              borderSide: BorderSide(color: Colors.grey.shade300),
+                              borderSide: BorderSide(
+                                color: Colors.grey.shade300,
+                              ),
                             ),
                             focusedBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8),
@@ -199,10 +211,15 @@ class _LoginScreenState extends State<LoginScreen> {
                           controller: _passwordController,
                           obscureText: !_isPasswordVisible, // Ẩn/hiện mật khẩu
                           decoration: InputDecoration(
-                            prefixIcon: Icon(Icons.lock_outline, color: Colors.grey.shade600),
+                            prefixIcon: Icon(
+                              Icons.lock_outline,
+                              color: Colors.grey.shade600,
+                            ),
                             suffixIcon: IconButton(
                               icon: Icon(
-                                _isPasswordVisible ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                                _isPasswordVisible
+                                    ? Icons.visibility_off_outlined
+                                    : Icons.visibility_outlined,
                                 color: Colors.grey.shade600,
                               ),
                               onPressed: () {
@@ -213,11 +230,15 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8),
-                              borderSide: BorderSide(color: Colors.grey.shade300),
+                              borderSide: BorderSide(
+                                color: Colors.grey.shade300,
+                              ),
                             ),
                             enabledBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8),
-                              borderSide: BorderSide(color: Colors.grey.shade300),
+                              borderSide: BorderSide(
+                                color: Colors.grey.shade300,
+                              ),
                             ),
                             focusedBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8),
@@ -235,7 +256,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             return null;
                           },
                         ),
-                        
+
                         // Quên mật khẩu
                         Align(
                           alignment: Alignment.centerRight,
@@ -281,18 +302,56 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ),
                           ),
                         ),
-                        
+
+                        if (AppConfig.demoMode) ...[
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 48,
+                            child: OutlinedButton.icon(
+                              onPressed: _isLoading
+                                  ? null
+                                  : () {
+                                      _phoneController.text = '0900000000';
+                                      _passwordController.text = 'demo123';
+                                      _handleLogin();
+                                    },
+                              icon: const Icon(Icons.play_circle_outline),
+                              label: const Text('VÀO DEMO NGAY'),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'DEMO MODE · dữ liệu mô phỏng được gắn nhãn rõ',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.orange,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+
                         // Đường kẻ hoặc
                         Padding(
                           padding: const EdgeInsets.symmetric(vertical: 24),
                           child: Row(
                             children: [
-                              Expanded(child: Divider(color: Colors.grey.shade300)),
-                              Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 16),
-                                child: Text('hoặc', style: TextStyle(color: Colors.grey.shade500)),
+                              Expanded(
+                                child: Divider(color: Colors.grey.shade300),
                               ),
-                              Expanded(child: Divider(color: Colors.grey.shade300)),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                ),
+                                child: Text(
+                                  'hoặc',
+                                  style: TextStyle(color: Colors.grey.shade500),
+                                ),
+                              ),
+                              Expanded(
+                                child: Divider(color: Colors.grey.shade300),
+                              ),
                             ],
                           ),
                         ),
@@ -319,7 +378,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ),
                         ),
-                        
+
                         const SizedBox(height: 24),
 
                         // Nút Đăng ký được chèn thêm vào
@@ -328,14 +387,20 @@ class _LoginScreenState extends State<LoginScreen> {
                           children: [
                             Text(
                               'Bạn chưa có tài khoản? ',
-                              style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
+                              style: TextStyle(
+                                color: Colors.grey.shade600,
+                                fontSize: 14,
+                              ),
                             ),
                             TextButton(
                               onPressed: () {
                                 // Điều hướng sang màn hình Đăng ký
                                 Navigator.push(
                                   context,
-                                  MaterialPageRoute(builder: (context) => const RegisterScreen()),
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        const RegisterScreen(),
+                                  ),
                                 );
                               },
                               style: TextButton.styleFrom(

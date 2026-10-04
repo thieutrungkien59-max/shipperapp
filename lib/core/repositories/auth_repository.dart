@@ -1,5 +1,7 @@
 import '../../services/api_service.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../../services/session_service.dart';
+import '../config/app_config.dart';
+import '../demo/demo_delivery_store.dart';
 
 class AuthRepository {
   final ApiServices _apiService;
@@ -9,31 +11,62 @@ class AuthRepository {
   // Hàm xử lý đăng nhập Shipper
   Future<bool> login(String username, String password) async {
     try {
-      final body = {
-        "username": username,
-        "password": password
-      };
-      
-      // Gọi đến endpoint đăng nhập
-      final response = await _apiService.post('/api/Auth/login', body);
-      
-      // Trích xuất dữ liệu từ phản hồi của Backend
-      final user = response['user'];
-      final maTk = user['maTk'];
-      final chiTiet = user['chiTiet'];
-      final maSp = chiTiet['maSp'];
+      if (AppConfig.demoMode) {
+        await SessionService.saveSession(
+          accountId: 'DEMO-ACCOUNT-01',
+          driverId: DemoDeliveryStore.instance.driverId,
+          accessToken: 'demo-token-not-for-production',
+          userName: 'Tài xế Demo',
+          userRole: 'DRIVER',
+        );
+        return true;
+      }
+      final body = {'username': username, 'password': password};
+      dynamic response;
 
-      // Lưu vào bộ nhớ cục bộ của điện thoại
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('maTk', maTk); // BỔ SUNG LƯU MÃ TÀI KHOẢN
-      await prefs.setString('maSp', maSp); 
-      
+      try {
+        response = await _apiService.post('/api/identity/login', body);
+      } on ApiException catch (error) {
+        if (error.statusCode != 404) rethrow;
+        response = await _apiService.post('/api/Auth/login', body);
+      }
+
+      // Trích xuất dữ liệu từ phản hồi của Backend
+      final responseMap = Map<String, dynamic>.from(response as Map);
+      final rawUser = responseMap['user'] ?? responseMap['data'] ?? responseMap;
+      final user = Map<String, dynamic>.from(rawUser as Map);
+      final rawDetail = user['chiTiet'] ?? user['profile'] ?? const {};
+      final chiTiet = Map<String, dynamic>.from(rawDetail as Map);
+      final maTk = (user['maTk'] ?? user['id'] ?? user['userId'] ?? '')
+          .toString();
+      final maSp = (chiTiet['maSp'] ?? user['maSp'] ?? user['driverId'] ?? '')
+          .toString();
+      final token =
+          (responseMap['accessToken'] ??
+                  responseMap['token'] ??
+                  responseMap['jwt'])
+              ?.toString();
+
+      if (maTk.isEmpty || maSp.isEmpty) {
+        throw Exception('Backend đăng nhập chưa trả đủ user id và driver id.');
+      }
+
+      await SessionService.saveSession(
+        accountId: maTk,
+        driverId: maSp,
+        accessToken: token,
+        userName: (user['hoTen'] ?? user['name'])?.toString(),
+        userRole: (user['role'] ?? user['vaiTro'])?.toString(),
+      );
+
       // Tạm thời trả về true nếu không có lỗi văng ra
-      return true; 
+      return true;
     } catch (e) {
       throw Exception('Đăng nhập thất bại: $e');
     }
   }
+
+  Future<void> logout() => SessionService.clear();
 
   // Hàm xử lý đăng ký Shipper mới
   Future<bool> register({
@@ -48,7 +81,7 @@ class AuthRepository {
   }) async {
     try {
       final body = {
-        "tenDangNhap": soDienThoai, 
+        "tenDangNhap": soDienThoai,
         "matKhau": password,
         "hoTen": hoTen,
         "soDienThoai": soDienThoai,
@@ -56,11 +89,11 @@ class AuthRepository {
         "gplx": gplx,
         "bienSoXe": bienSoXe,
         "loaiPhuongTien": loaiPhuongTien,
-        "taiTrongToiDa": taiTrongToiDa
+        "taiTrongToiDa": taiTrongToiDa,
       };
-      
+
       await _apiService.post('/api/Auth/register-shipper', body);
-      return true; 
+      return true;
     } catch (e) {
       throw Exception('Lỗi đăng ký: $e');
     }

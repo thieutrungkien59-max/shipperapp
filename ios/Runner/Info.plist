@@ -32,6 +32,8 @@
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Ứng dụng cần quyền camera để chụp ảnh minh chứng khi lấy/giao hàng.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Ứng dụng cần vị trí để cập nhật GPS và chỉ đường khi giao hàng.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/config/app_config.dart';
 import '../../../core/repositories/order_repository.dart';
 import '../../../services/api_service.dart';
 import 'camera_capture_screen.dart';
@@ -127,6 +128,18 @@ class _CameraProofScreenState extends State<CameraProofScreen> {
   String _buildImageDataUri(Uint8List bytes) {
     return 'data:image/png;base64,${base64Encode(bytes)}';
   }
+
+  void _useDemoProof() {
+    if (!AppConfig.demoMode) return;
+    setState(() => _photoBytes = Uint8List.fromList(_demoProofPng));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Đã sử dụng minh chứng Demo.')),
+    );
+  }
+
+  static final List<int> _demoProofPng = base64Decode(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+  );
 
   // ----- CHỮ KÝ: XỬ LÝ VẼ TAY TRÊN BẢNG TRẮNG (dùng sự kiện con trỏ thô, không qua Scrollable) -----
   void _handleSignaturePointerDown(PointerDownEvent event) {
@@ -275,6 +288,17 @@ class _CameraProofScreenState extends State<CameraProofScreen> {
                   ),
                   const SizedBox(height: 12),
                   _buildPhotoProofSection(),
+                  if (AppConfig.demoMode && !_hasPhoto) ...[
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _useDemoProof,
+                        icon: const Icon(Icons.science_outlined),
+                        label: const Text('Sử dụng minh chứng Demo'),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 24),
 
                   const Text(

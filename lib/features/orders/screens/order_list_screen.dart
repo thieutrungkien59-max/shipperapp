@@ -71,7 +71,6 @@ class _OrderListScreenState extends State<OrderListScreen> {
   // TODO: chuyển sang core/constants/app_colors.dart (xem ghi chú tương tự trong login_screen.dart)
   static const Color primaryRed = Color(0xFFE63946);
   static const Color backgroundBeige = Color(0xFFFBF3EE);
-  static const Color textGrey = Color(0xFF8A8A8A);
   static const Color borderGrey = Color(0xFFE8E0DA);
 
   int _selectedTab = 0; // 0: Tất cả, 1: Đang xử lý, 2: Hoàn tất, 3: Thất bại
@@ -164,9 +163,7 @@ class _OrderListScreenState extends State<OrderListScreen> {
               decoration: BoxDecoration(
                 color: isSelected ? primaryRed : Colors.white,
                 borderRadius: BorderRadius.circular(24),
-                border: Border.all(
-                  color: isSelected ? primaryRed : borderGrey,
-                ),
+                border: Border.all(color: isSelected ? primaryRed : borderGrey),
               ),
               child: Text(
                 _tabs[index],
@@ -221,8 +218,11 @@ class _OrderListScreenState extends State<OrderListScreen> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.location_on_outlined,
-                  size: 16, color: Colors.black45),
+              const Icon(
+                Icons.location_on_outlined,
+                size: 16,
+                color: Colors.black45,
+              ),
               const SizedBox(width: 4),
               Expanded(
                 child: Text(

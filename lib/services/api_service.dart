@@ -1,102 +1,154 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
-class ApiServices {
-  // Đường dẫn gốc gọi đến Backend Swagger (Local IP)
-  static const String baseUrl = 'https://startle-kilogram-greeting.ngrok-free.dev';
+import '../core/config/app_config.dart';
+import 'session_service.dart';
 
-  // Cấu hình Header mặc định cho mọi Request
-  Map<String, String> _buildHeaders() {
-    return {
+class ApiException implements Exception {
+  const ApiException(this.message, {this.statusCode, this.body});
+
+  final String message;
+  final int? statusCode;
+  final dynamic body;
+
+  @override
+  String toString() => message;
+}
+
+class ApiServices {
+  ApiServices({http.Client? client, Duration? timeout})
+    : _client = client ?? http.Client(),
+      _timeout = timeout ?? const Duration(seconds: 20);
+
+  final http.Client _client;
+  final Duration _timeout;
+
+  static String get baseUrl => AppConfig.apiBaseUrl;
+
+  Future<Map<String, String>> _buildHeaders() async {
+    final token = await SessionService.getAccessToken();
+    return <String, String>{
       'Content-Type': 'application/json; charset=UTF-8',
       'Accept': 'application/json',
       'ngrok-skip-browser-warning': 'true',
-      // 'Authorization': 'Bearer $token', // Bỏ comment dòng này khi có Token đăng nhập
+      if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
     };
   }
 
-  // Hàm xử lý phương thức GET
   Future<dynamic> get(String endpoint) async {
-    final url = Uri.parse('$baseUrl$endpoint');
-    try {
-      final response = await http.get(url, headers: _buildHeaders());
-      return _handleResponse(response);
-    } on Exception {
-      rethrow; // Lỗi HTTP (400/401/403/404/500...) đã có thông báo rõ ràng từ _handleResponse, không bọc lại
-    } catch (e) {
-      throw Exception('Lỗi kết nối mạng: $e');
-    }
+    return _send('GET', endpoint);
   }
 
-  // Hàm xử lý phương thức POST
   Future<dynamic> post(String endpoint, Map<String, dynamic> body) async {
-    final url = Uri.parse('$baseUrl$endpoint');
-    try {
-      final response = await http.post(
-        url,
-        headers: _buildHeaders(),
-        body: jsonEncode(body),
-      );
-      return _handleResponse(response);
-    } on Exception {
-      rethrow;
-    } catch (e) {
-      throw Exception('Lỗi kết nối mạng: $e');
-    }
+    return _send('POST', endpoint, body: body);
   }
 
   Future<dynamic> put(String endpoint, Map<String, dynamic> body) async {
-    final url = Uri.parse('$baseUrl$endpoint');
+    return _send('PUT', endpoint, body: body);
+  }
+
+  Future<dynamic> patch(String endpoint, Map<String, dynamic> body) async {
+    return _send('PATCH', endpoint, body: body);
+  }
+
+  Future<dynamic> delete(String endpoint, {Map<String, dynamic>? body}) async {
+    return _send('DELETE', endpoint, body: body);
+  }
+
+  Future<dynamic> _send(
+    String method,
+    String endpoint, {
+    Map<String, dynamic>? body,
+  }) async {
+    final url = AppConfig.resolve(endpoint);
     try {
-      final response = await http.put(
-        url,
-        headers: _buildHeaders(),
-        body: jsonEncode(body),
-      );
-      return _handleResponse(response);
-    } on Exception {
+      final headers = await _buildHeaders();
+      final encodedBody = body == null ? null : jsonEncode(body);
+      final http.Response response;
+
+      switch (method) {
+        case 'GET':
+          response = await _client.get(url, headers: headers).timeout(_timeout);
+          break;
+        case 'POST':
+          response = await _client
+              .post(url, headers: headers, body: encodedBody)
+              .timeout(_timeout);
+          break;
+        case 'PUT':
+          response = await _client
+              .put(url, headers: headers, body: encodedBody)
+              .timeout(_timeout);
+          break;
+        case 'PATCH':
+          response = await _client
+              .patch(url, headers: headers, body: encodedBody)
+              .timeout(_timeout);
+          break;
+        case 'DELETE':
+          response = await _client
+              .delete(url, headers: headers, body: encodedBody)
+              .timeout(_timeout);
+          break;
+        default:
+          throw ArgumentError.value(
+            method,
+            'method',
+            'Unsupported HTTP method',
+          );
+      }
+
+      return await _handleResponse(response);
+    } on ApiException {
       rethrow;
     } catch (e) {
-      throw Exception('Lỗi kết nối mạng: $e');
+      throw ApiException('Lỗi kết nối mạng tới $baseUrl: $e');
     }
   }
 
-  // Hàm xử lý lỗi tập trung dựa vào Status Code
-  dynamic _handleResponse(http.Response response) {
-    if (response.statusCode >= 200 && response.statusCode < 300) {
-      // Thành công: Chuyển đổi chuỗi JSON thành đối tượng Dart
-      return jsonDecode(response.body);
-    } else {
-      // Cố gắng lấy message lỗi thật do backend trả về (thường nằm trong body dạng JSON)
-      String? serverMessage;
-      try {
-        final decoded = jsonDecode(response.body);
-        if (decoded is Map) {
-          serverMessage = decoded['message'] ?? decoded['title'] ?? decoded['error'];
-        } else if (decoded is String && decoded.isNotEmpty) {
-          serverMessage = decoded;
-        }
-      } catch (_) {
-        // Body không phải JSON (vd HTML trang lỗi) -> bỏ qua, dùng message mặc định
-      }
+  Future<dynamic> _handleResponse(http.Response response) async {
+    final decoded = _decodeBody(response.body);
 
-      // Thất bại: Bắt các mã lỗi phổ biến và quăng Exception
-      switch (response.statusCode) {
-        case 400:
-          throw Exception(serverMessage ?? 'Yêu cầu không hợp lệ (400)');
-        case 401:
-          throw Exception('Sai tài khoản/mật khẩu hoặc hết phiên đăng nhập (401)');
-        case 403:
-          throw Exception('Không có quyền truy cập (403)');
-        case 404:
-          throw Exception(serverMessage ?? 'Không tìm thấy dữ liệu (404)');
-        case 500:
-          throw Exception(
-            serverMessage != null ? 'Lỗi máy chủ (500): $serverMessage' : 'Lỗi máy chủ nội bộ (500)',
-          );
-        default:
-          throw Exception(serverMessage ?? 'Đã xảy ra lỗi: ${response.statusCode}');
-      }
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return decoded;
     }
+
+    if (response.statusCode == 401) {
+      await SessionService.clear();
+    }
+
+    final serverMessage = _extractMessage(decoded);
+    final message = switch (response.statusCode) {
+      400 => serverMessage ?? 'Yêu cầu không hợp lệ (400)',
+      401 =>
+        serverMessage ?? 'Sai thông tin đăng nhập hoặc phiên đã hết hạn (401)',
+      403 => serverMessage ?? 'Không có quyền truy cập (403)',
+      404 => serverMessage ?? 'Không tìm thấy API hoặc dữ liệu (404)',
+      >= 500 =>
+        serverMessage == null
+            ? 'Lỗi máy chủ (${response.statusCode})'
+            : 'Lỗi máy chủ (${response.statusCode}): $serverMessage',
+      _ => serverMessage ?? 'Đã xảy ra lỗi: ${response.statusCode}',
+    };
+
+    throw ApiException(message, statusCode: response.statusCode, body: decoded);
+  }
+
+  dynamic _decodeBody(String body) {
+    if (body.trim().isEmpty) return null;
+    try {
+      return jsonDecode(body);
+    } catch (_) {
+      return body;
+    }
+  }
+
+  String? _extractMessage(dynamic decoded) {
+    if (decoded is Map) {
+      return (decoded['message'] ?? decoded['title'] ?? decoded['error'])
+          ?.toString();
+    }
+    if (decoded is String && decoded.trim().isNotEmpty) return decoded.trim();
+    return null;
   }
 }

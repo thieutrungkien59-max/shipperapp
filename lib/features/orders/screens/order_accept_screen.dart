@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/repositories/order_repository.dart';
+import '../../../core/config/app_config.dart';
 import '../../../models/don_hang_model.dart';
 import '../../../services/api_service.dart';
 import '../../map_tracking/screens/map_delivery_screen.dart';
@@ -51,10 +52,6 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
   String? _loadError;
   DonHangModel? _order;
   double _taiTrongXe = 0;
-
-  // TODO: Xác nhận lại với backend giá trị trạng thái chính xác khi Shipper nhận đơn
-  // (ví dụ: "DaXacNhan", "DangLayHang"...). Đang tạm để "DaXacNhan".
-  static const String _trangThaiKhiNhanDon = 'DaXacNhan';
 
   final Color _primaryRed = const Color(0xFFE51D35);
 
@@ -109,7 +106,11 @@ class _OrderAcceptScreenState extends State<OrderAcceptScreen> {
       // 4. pool ChoXacNhan hiện tại.
       final results = await Future.wait([
         _orderRepository.getOrderDetail(widget.maDh),
-        if (maTk != null && maTk.isNotEmpty)
+        if (AppConfig.demoMode)
+          Future.value({
+            'chiTiet': {'taiTrongToiDa': 20},
+          })
+        else if (maTk != null && maTk.isNotEmpty)
           _apiService.get('/api/Auth/profile/$maTk')
         else
           Future.value(null),

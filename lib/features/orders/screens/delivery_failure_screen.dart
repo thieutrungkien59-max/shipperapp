@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/repositories/order_repository.dart';
 import '../../../services/api_service.dart';
-import '../../../models/don_hang_model.dart';
 
 /// Màn hình Shipper báo cáo giao hàng thất bại.
 /// Trả về DonHangModel (đã fetch lại mới nhất từ server) qua Navigator.pop khi gửi báo cáo
@@ -11,14 +10,16 @@ import '../../../models/don_hang_model.dart';
 /// thoát về Home). Trả về `null` nếu người dùng huỷ thao tác hoặc có lỗi.
 class DeliveryFailureScreen extends StatefulWidget {
   final String maDonHang;
-  final int soLanThatBaiHienTai; // Số lần đã thất bại trước đó (lấy từ order.soLanGiaoThatBai)
+  final int
+  soLanThatBaiHienTai; // Số lần đã thất bại trước đó (lấy từ order.soLanGiaoThatBai)
   final int soLanToiDa;
 
   const DeliveryFailureScreen({
     Key? key,
     required this.maDonHang,
     required this.soLanThatBaiHienTai,
-    this.soLanToiDa = 3, // Chỉ mang tính hiển thị tham khảo; quyết định huỷ đơn thật do server trả về
+    this.soLanToiDa =
+        3, // Chỉ mang tính hiển thị tham khảo; quyết định huỷ đơn thật do server trả về
   }) : super(key: key);
 
   @override
@@ -97,7 +98,9 @@ class _DeliveryFailureScreenState extends State<DeliveryFailureScreen> {
       // Lấy lại dữ liệu đơn hàng mới nhất từ server (nguồn dữ liệu chuẩn duy nhất) để biết
       // chính xác: soLanGiaoThatBai đã tăng chưa, và trangThai còn "DangGiao" hay đã bị server
       // tự chuyển thành "GiaoThatBai" (khi đạt số lần tối đa).
-      final updatedOrder = await _orderRepository.getOrderDetail(widget.maDonHang);
+      final updatedOrder = await _orderRepository.getOrderDetail(
+        widget.maDonHang,
+      );
 
       if (!mounted) return;
       Navigator.pop(context, updatedOrder);
@@ -108,7 +111,9 @@ class _DeliveryFailureScreenState extends State<DeliveryFailureScreen> {
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Lỗi báo cáo giao thất bại: ${e.toString().replaceAll('Exception: ', '')}'),
+            content: Text(
+              'Lỗi báo cáo giao thất bại: ${e.toString().replaceAll('Exception: ', '')}',
+            ),
             backgroundColor: Colors.red,
           ),
         );
@@ -133,7 +138,12 @@ class _DeliveryFailureScreenState extends State<DeliveryFailureScreen> {
                   const SizedBox(height: 24),
                   const Text(
                     'LÝ DO GIAO THẤT BẠI',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black54, letterSpacing: 0.5),
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black54,
+                      letterSpacing: 0.5,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   _buildReasonList(),
@@ -166,7 +176,11 @@ class _DeliveryFailureScreenState extends State<DeliveryFailureScreen> {
         children: [
           const Text(
             'Báo cáo giao thất bại',
-            style: TextStyle(color: Colors.black87, fontSize: 18, fontWeight: FontWeight.bold),
+            style: TextStyle(
+              color: Colors.black87,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
           ),
           const SizedBox(height: 2),
           Text(
@@ -187,7 +201,13 @@ class _DeliveryFailureScreenState extends State<DeliveryFailureScreen> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.grey.shade200),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 4))],
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -201,7 +221,11 @@ class _DeliveryFailureScreenState extends State<DeliveryFailureScreen> {
               ),
               Text(
                 'Lần thất bại: $lanThatBaiSauKhiXacNhan/${widget.soLanToiDa}',
-                style: TextStyle(color: _warningOrange, fontWeight: FontWeight.bold, fontSize: 13),
+                style: TextStyle(
+                  color: _warningOrange,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                ),
               ),
             ],
           ),
@@ -212,7 +236,9 @@ class _DeliveryFailureScreenState extends State<DeliveryFailureScreen> {
               return Expanded(
                 child: Container(
                   height: 8,
-                  margin: EdgeInsets.only(right: index == widget.soLanToiDa - 1 ? 0 : 6),
+                  margin: EdgeInsets.only(
+                    right: index == widget.soLanToiDa - 1 ? 0 : 6,
+                  ),
                   decoration: BoxDecoration(
                     color: isFilled ? _warningOrange : Colors.grey.shade200,
                     borderRadius: BorderRadius.circular(4),
@@ -242,12 +268,17 @@ class _DeliveryFailureScreenState extends State<DeliveryFailureScreen> {
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: isSelected ? _primaryRed : Colors.grey.shade200, width: isSelected ? 1.5 : 1),
+              border: Border.all(
+                color: isSelected ? _primaryRed : Colors.grey.shade200,
+                width: isSelected ? 1.5 : 1,
+              ),
             ),
             child: Row(
               children: [
                 Icon(
-                  isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
+                  isSelected
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_off,
                   color: isSelected ? _primaryRed : Colors.grey.shade400,
                 ),
                 const SizedBox(width: 12),
@@ -274,9 +305,18 @@ class _DeliveryFailureScreenState extends State<DeliveryFailureScreen> {
         filled: true,
         fillColor: Colors.white,
         contentPadding: const EdgeInsets.all(16),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: _primaryRed)),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey.shade300),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey.shade300),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: _primaryRed),
+        ),
       ),
     );
   }
@@ -292,12 +332,20 @@ class _DeliveryFailureScreenState extends State<DeliveryFailureScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.warning_amber_rounded, color: Colors.orange.shade700, size: 20),
+          Icon(
+            Icons.warning_amber_rounded,
+            color: Colors.orange.shade700,
+            size: 20,
+          ),
           const SizedBox(width: 12),
           const Expanded(
             child: Text(
               'Từ lần thất bại thứ 2, phí phát sinh sẽ được tính cho người gửi.',
-              style: TextStyle(color: Colors.black87, fontSize: 13, height: 1.4),
+              style: TextStyle(
+                color: Colors.black87,
+                fontSize: 13,
+                height: 1.4,
+              ),
             ),
           ),
         ],
@@ -308,7 +356,10 @@ class _DeliveryFailureScreenState extends State<DeliveryFailureScreen> {
   Widget _buildBottomAction() {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: Colors.grey.shade200))),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(top: BorderSide(color: Colors.grey.shade200)),
+      ),
       child: SafeArea(
         child: Column(
           children: [
@@ -320,18 +371,27 @@ class _DeliveryFailureScreenState extends State<DeliveryFailureScreen> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _primaryRed,
                   disabledBackgroundColor: _primaryRed.withOpacity(0.6),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                   elevation: 0,
                 ),
                 child: _isSubmitting
                     ? const SizedBox(
                         height: 22,
                         width: 22,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
                       )
                     : const Text(
                         'Xác nhận giao thất bại',
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
                       ),
               ),
             ),

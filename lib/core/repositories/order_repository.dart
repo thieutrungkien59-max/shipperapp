@@ -3,6 +3,8 @@ import 'package:latlong2/latlong.dart';
 import '../../models/don_hang_model.dart';
 import '../../models/shipping_quote_model.dart';
 import '../../services/api_service.dart';
+import '../config/app_config.dart';
+import '../demo/demo_delivery_store.dart';
 
 class OrderRepository {
   final ApiServices _apiService;
@@ -43,6 +45,9 @@ class OrderRepository {
   // LẤY DANH SÁCH ĐƠN CHỜ NHẬN (pool đơn "ChoXacNhan", chưa gán cho Shipper nào)
   // -> Dùng cho card "Đơn hàng mới" ở màn Home
   Future<List<DonHangModel>> getOrdersAvailableToAccept() async {
+    if (AppConfig.demoMode) {
+      return DemoDeliveryStore.instance.availableOrders;
+    }
     try {
       final response = await _apiService.get('/api/DonHang/danh-sach-cho-nhan');
       return _parseOrderList(response);
@@ -56,6 +61,9 @@ class OrderRepository {
   Future<List<DonHangModel>> getAssignedOrdersWaitingConfirmation(
     String maShipper,
   ) async {
+    if (AppConfig.demoMode) {
+      return DemoDeliveryStore.instance.assignedOrders;
+    }
     try {
       final response = await _apiService.get(
         '/api/DonHang/shipper/$maShipper/cho-xac-nhan',
@@ -77,6 +85,10 @@ class OrderRepository {
     required String maDonHang,
     required String maShipper,
   }) async {
+    if (AppConfig.demoMode) {
+      DemoDeliveryStore.instance.accept();
+      return;
+    }
     try {
       await _apiService.post('/api/DonHang/shipper-tu-nhan-don', {
         'maDonHang': maDonHang,
@@ -94,6 +106,14 @@ class OrderRepository {
     required bool chapNhan,
     String? lyDo,
   }) async {
+    if (AppConfig.demoMode) {
+      if (chapNhan) {
+        DemoDeliveryStore.instance.accept();
+      } else {
+        DemoDeliveryStore.instance.reject();
+      }
+      return;
+    }
     try {
       await _apiService.post('/api/DonHang/shipper-phan-hoi-don', {
         'maDonHang': maDonHang,
@@ -109,6 +129,9 @@ class OrderRepository {
   // LẤY DANH SÁCH ĐƠN HÀNG ĐÃ THUỘC VỀ 1 SHIPPER (mọi trạng thái: DaXacNhan, DangGiao, DaGiao...)
   // -> Dùng cho tab Orders (đơn Shipper đang xử lý)
   Future<List<DonHangModel>> getOrdersByShipper(String maShipper) async {
+    if (AppConfig.demoMode) {
+      return DemoDeliveryStore.instance.driverOrders;
+    }
     try {
       final response = await _apiService.get('/api/DonHang/shipper/$maShipper');
       return _parseOrderList(response);
@@ -119,6 +142,9 @@ class OrderRepository {
 
   // LẤY CHI TIẾT 1 ĐƠN HÀNG THEO MÃ ĐƠN (dùng cho màn OrderAcceptScreen)
   Future<DonHangModel> getOrderDetail(String maDh) async {
+    if (AppConfig.demoMode && maDh == DemoDeliveryStore.instance.order.maDh) {
+      return DemoDeliveryStore.instance.order;
+    }
     try {
       final response = await _apiService.get('/api/DonHang/chi-tiet/$maDh');
       return DonHangModel.fromJson(response);
@@ -134,6 +160,10 @@ class OrderRepository {
     String trangThaiMoi, {
     String ghiChu = '',
   }) async {
+    if (AppConfig.demoMode) {
+      DemoDeliveryStore.instance.updateStatus(trangThaiMoi);
+      return true;
+    }
     try {
       final body = {
         "maDonHang": maDonHang,
@@ -157,6 +187,10 @@ class OrderRepository {
     required String maShipper,
     String? lyDo,
   }) async {
+    if (AppConfig.demoMode) {
+      DemoDeliveryStore.instance.reject();
+      return;
+    }
     try {
       await _apiService.post('/api/DonHang/shipper-tra-don-dieu-phoi', {
         'maDonHang': maDonHang,
@@ -174,6 +208,7 @@ class OrderRepository {
     String? hinhAnhUrl,
     String? chuKyOtp,
   }) async {
+    if (AppConfig.demoMode) return true;
     try {
       final body = {
         "maDonHang": maDonHang,
@@ -194,6 +229,7 @@ class OrderRepository {
     required String maShipper,
     required String lyDo,
   }) async {
+    if (AppConfig.demoMode) return true;
     try {
       final body = {
         "maDonHang": maDonHang,
@@ -215,6 +251,18 @@ class OrderRepository {
     required LatLng pickup,
     required LatLng delivery,
   }) async {
+    if (AppConfig.demoMode) {
+      return ShippingQuoteModel(
+        distanceKm: 5.8,
+        durationMinutes: 24,
+        baseFee: 15000,
+        feePerKm: 3000,
+        isPeakHour: false,
+        peakMultiplier: 1,
+        shippingFee: 32000,
+        routePoints: [pickup, delivery],
+      );
+    }
     try {
       final body = {
         "viDoLay": pickup.latitude,
@@ -242,6 +290,7 @@ class OrderRepository {
   // Khi Backend nối nhà mạng SMS thật, có thể maOtp sẽ không còn được trả về nữa
   // (khi đó hàm này vẫn hoạt động, chỉ là chuỗi trả về sẽ rỗng/không dùng được).
   Future<String> sendOtp(String soDienThoai) async {
+    if (AppConfig.demoMode) return '123456';
     try {
       final response = await _apiService.post('/api/DonHang/gui-otp', {
         "soDienThoai": soDienThoai,

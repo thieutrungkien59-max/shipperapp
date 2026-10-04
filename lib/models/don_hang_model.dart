@@ -18,7 +18,8 @@ class DonHangModel {
   // vốn được tính riêng qua OrderRepository.calculateShippingRoute().
   final double? quangDuongKm;
   final int? duKienGiaoPhut;
-  final double khoiLuong; // Đơn vị: kg - dùng để so sánh với tải trọng tối đa của Shipper
+  final double
+  khoiLuong; // Đơn vị: kg - dùng để so sánh với tải trọng tối đa của Shipper
   final String? kichThuoc;
   final double tienCod;
   final double phiGiaoHang;
@@ -71,32 +72,70 @@ class DonHangModel {
   factory DonHangModel.fromJson(Map<String, dynamic> json) {
     return DonHangModel(
       maDh: (json['maDh'] ?? json['maDon'] ?? json['id'])?.toString() ?? '',
-      maKh: json['maKh']?.toString() ?? '',
-      maSp: json['maSp']?.toString(),
-      tenNguoiNhan: json['tenNguoiNhan']?.toString() ?? '',
-      sdtNguoiNhan: (json['sdtNguoiNhan'] ?? json['lienHeGiaoHang'])?.toString() ?? '',
+      maKh:
+          (json['maKh'] ?? json['senderId'] ?? json['customerId'])
+              ?.toString() ??
+          '',
+      maSp: (json['maSp'] ?? json['assignedDriverId'])?.toString(),
+      tenNguoiNhan:
+          (json['tenNguoiNhan'] ?? json['receiverName'])?.toString() ?? '',
+      sdtNguoiNhan:
+          (json['sdtNguoiNhan'] ??
+                  json['lienHeGiaoHang'] ??
+                  json['receiverPhone'])
+              ?.toString() ??
+          '',
       // Backend hiện có thể trả field này dưới nhiều tên khác nhau tuỳ API;
       // thử lần lượt các khả năng, để trống nếu API chưa có dữ liệu này.
-      sdtNguoiGui: (json['sdtNguoiGui'] ?? json['lienHeLayHang'] ?? json['sdtNguoiGoi'])?.toString() ?? '',
-      diaChiLay: (json['diaChiLay'] ?? json['diemLayHang'])?.toString() ?? '',
-      diaChiGiao: (json['diaChiGiao'] ?? json['diemGiaoHang'])?.toString() ?? '',
-      viDoLay: _parseNullableDouble(json['viDoLay']),
-      kinhDoLay: _parseNullableDouble(json['kinhDoLay']),
-      viDoGiao: _parseNullableDouble(json['viDoGiao']),
-      kinhDoGiao: _parseNullableDouble(json['kinhDoGiao']),
-      quangDuongKm: _parseNullableDouble(json['quangDuongKm']),
-      duKienGiaoPhut: json['duKienGiaoPhut'] is int
-          ? json['duKienGiaoPhut']
-          : int.tryParse('${json['duKienGiaoPhut'] ?? ''}'),
-      khoiLuong: _parseDouble(json['khoiLuong'] ?? json['trongLuong']),
-      kichThuoc: json['kichThuoc']?.toString(),
-      tienCod: _parseDouble(json['tienCod']),
-      phiGiaoHang: _parseDouble(json['phiGiaoHang']),
-      trangThai: json['trangThai']?.toString() ?? '',
+      sdtNguoiGui:
+          (json['sdtNguoiGui'] ??
+                  json['lienHeLayHang'] ??
+                  json['sdtNguoiGoi'] ??
+                  json['senderPhone'])
+              ?.toString() ??
+          '',
+      diaChiLay:
+          (json['diaChiLay'] ?? json['diemLayHang'] ?? json['pickupAddress'])
+              ?.toString() ??
+          '',
+      diaChiGiao:
+          (json['diaChiGiao'] ??
+                  json['diemGiaoHang'] ??
+                  json['deliveryAddress'])
+              ?.toString() ??
+          '',
+      viDoLay: _parseNullableDouble(json['viDoLay'] ?? json['pickupLatitude']),
+      kinhDoLay: _parseNullableDouble(
+        json['kinhDoLay'] ?? json['pickupLongitude'],
+      ),
+      viDoGiao: _parseNullableDouble(
+        json['viDoGiao'] ?? json['deliveryLatitude'],
+      ),
+      kinhDoGiao: _parseNullableDouble(
+        json['kinhDoGiao'] ?? json['deliveryLongitude'],
+      ),
+      quangDuongKm: _parseNullableDouble(
+        json['quangDuongKm'] ?? json['distanceKm'],
+      ),
+      duKienGiaoPhut:
+          (json['duKienGiaoPhut'] ?? json['estimatedDurationMinutes']) is int
+          ? (json['duKienGiaoPhut'] ?? json['estimatedDurationMinutes']) as int
+          : int.tryParse(
+              '${json['duKienGiaoPhut'] ?? json['estimatedDurationMinutes'] ?? ''}',
+            ),
+      khoiLuong: _parseDouble(
+        json['khoiLuong'] ?? json['trongLuong'] ?? json['weight'],
+      ),
+      kichThuoc: (json['kichThuoc'] ?? json['size'])?.toString(),
+      tienCod: _parseDouble(json['tienCod'] ?? json['codAmount']),
+      phiGiaoHang: _parseDouble(json['phiGiaoHang'] ?? json['shippingFee']),
+      trangThai: (json['trangThai'] ?? json['status'])?.toString() ?? '',
       soLanGiaoThatBai: (json['soLanGiaoThatBai'] is int)
           ? json['soLanGiaoThatBai']
           : int.tryParse('${json['soLanGiaoThatBai'] ?? 0}') ?? 0,
-      ngayTao: json['ngayTao'] != null ? DateTime.tryParse(json['ngayTao'].toString()) : null,
+      ngayTao: (json['ngayTao'] ?? json['createdAt']) != null
+          ? DateTime.tryParse((json['ngayTao'] ?? json['createdAt']).toString())
+          : null,
     );
   }
 }

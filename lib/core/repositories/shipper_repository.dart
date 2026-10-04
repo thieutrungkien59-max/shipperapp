@@ -1,4 +1,5 @@
 import '../../services/api_service.dart';
+import '../config/app_config.dart';
 
 class ShipperRepository {
   final ApiServices _apiService;
@@ -11,12 +12,9 @@ class ShipperRepository {
     required double kinhDo, // longitude
     required double viDo, // latitude
   }) async {
+    if (AppConfig.demoMode) return;
     try {
-      final body = {
-        "maShipper": maShipper,
-        "kinhDo": kinhDo,
-        "viDo": viDo,
-      };
+      final body = {"maShipper": maShipper, "kinhDo": kinhDo, "viDo": viDo};
 
       await _apiService.post('/api/Shipper/cap-nhat-gps', body);
     } catch (e) {

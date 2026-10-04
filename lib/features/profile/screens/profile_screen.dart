@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../services/api_service.dart'; // Đảm bảo đường dẫn này đúng với project của bạn
+import '../../../core/config/app_config.dart';
+import '../../../core/demo/demo_delivery_store.dart';
 import 'edit_profile_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -71,6 +73,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
         throw Exception(
           'Không tìm thấy phiên đăng nhập. Vui lòng đăng nhập lại.',
         );
+      }
+
+      if (AppConfig.demoMode) {
+        final store = DemoDeliveryStore.instance;
+        if (!mounted) return;
+        setState(() {
+          _hoTen = 'Tài xế Demo';
+          _soDienThoai = '0900000000';
+          _cccd = '079000000001';
+          _gplx = 'DEMO-GPLX';
+          _bienSoXe = '59-D1 123.45';
+          _loaiPhuongTien = 'Xe máy';
+          _taiTrongToiDaRaw = 20;
+          _taiTrongToiDa = '20 kg';
+          _chieuDaiToiDa = 'Không giới hạn';
+          _chieuRongToiDa = 'Không giới hạn';
+          _chieuCaoToiDa = 'Không giới hạn';
+          _isApproved = true;
+          _isOnline = store.isOnline;
+          _tongDon = store.order.trangThai == 'DaGiao' ? 1 : 0;
+          _donThanhCong = _tongDon;
+          _tyLeThanhCong = _tongDon == 0 ? 0 : 100;
+          _danhGiaTrungBinh = 5;
+          _soLuotDanhGia = _tongDon;
+          _danhGiaCoDuLieu = _tongDon > 0;
+          _errorMessage = '';
+          _isLoading = false;
+        });
+        return;
       }
 
       final response = await _apiService.get('/api/Auth/profile/$maTk');
@@ -212,6 +243,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       // Xác định chuỗi trạng thái mới
       final trangThaiMoi = newValue ? 'TrucTuyen' : 'NgoaiTuyen';
+
+      if (AppConfig.demoMode) {
+        DemoDeliveryStore.instance.isOnline = newValue;
+        if (mounted) setState(() => _isOnline = newValue);
+        return;
+      }
 
       final body = {"maShipper": maSp, "trangThaiMoi": trangThaiMoi};
 
@@ -417,10 +454,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 shape: BoxShape.circle,
                 border: Border.all(color: Colors.grey.shade300, width: 2),
               ),
-              child: const CircleAvatar(
+              child: CircleAvatar(
                 radius: 40,
-                backgroundImage: NetworkImage(
-                  'https://i.pravatar.cc/150?img=11',
+                backgroundColor: _primaryRed.withValues(alpha: 0.12),
+                child: Icon(
+                  Icons.delivery_dining,
+                  color: _primaryRed,
+                  size: 44,
                 ),
               ),
             ),

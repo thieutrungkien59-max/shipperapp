@@ -32,6 +32,13 @@ migrate_working_dir/
 .pub/
 /build/
 /coverage/
+graphify-out/
+.playwright-cli/
+/output/playwright/
+emulator-*.png
+android-emulator-*.png
+emulator-window*.xml
+/demo/*.apk
 
 # Symbolication related
 app.*.symbols
